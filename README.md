@@ -15,7 +15,7 @@ shows the reduced-mass (one-body) picture, checks the conservation laws live, an
 
 ![Simulator showing a Molniya orbit around Earth with Kepler equal-area sectors shaded, velocity and force vectors, and the presets and initial-condition controls in the side panel](docs/images/main-view-molniya.jpg)
 
-- **Run it online:** https://semsem1313.github.io/two-body-simulator/
+- **Run it online:** https://fascinating-sunburst-7b19a5.netlify.app
 - **Run it offline:** download [`two_body_simulator.html`](two_body_simulator.html) and double-click it.
 
 The whole program is **one self-contained file**: HTML + CSS + plain JavaScript drawing on a Canvas 2D.
@@ -35,12 +35,12 @@ There are no libraries, no build step, no server and no internet connection need
 ## 2. How to run the simulation (step by step)
 
 **Option A — online (nothing to download)**
-1. Open https://semsem1313.github.io/two-body-simulator/.
+1. Open https://fascinating-sunburst-7b19a5.netlify.app.
 2. The simulation starts automatically with the geostationary preset.
 
 **Option B — offline, from this repository**
 1. Click the green **Code** button on this page → **Download ZIP**, and unzip it
-   (or `git clone https://github.com/semsem1313/two-body-simulator.git`).
+   (or `git clone https://github.com/Novapranay/two-body-simulator.git`).
 2. Double-click `two_body_simulator.html`. It opens in your default browser and starts running.
 
 **Option C — local web server (optional)**
