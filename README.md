@@ -5,7 +5,6 @@
 **Team members:** Jainil, Archit, Pranay
 
 - **Live simulator:** https://fascinating-sunburst-7b19a5.netlify.app
-- Forked from [semsem1313/two-body-simulator](https://github.com/semsem1313/two-body-simulator).
 
 ---
 
