@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two-Body Problem Simulator</title>
+<!--
+  TWO-BODY PROBLEM SIMULATOR — Statics & Dynamics (2nd-year Mechanical Engineering)
+  ---------------------------------------------------------------------------------
+  One self-contained file: HTML + CSS + vanilla JavaScript (Canvas 2D). No libraries.
+
+  File layout (search for the banners):
+    1. <style>                      dark "space" theme, responsive layout
+    2. <body>                       canvas (left) + side panel (controls, dashboard, graphs, theory)
+    3. <script id="physics-module">        PHYSICS MODULE  — pure functions, SI units, no DOM, no drawing
+    4. <script id="app-module">            SIMULATION STATE, UI, RENDERING, SELF-TESTS (uses Physics.*)
+
+  Every equation in the physics module is tagged [EQ-n]; the same tags are used in the Theory panel.
+-->
+<style>
+  :root {
+    --bg: #05070d; --panel: #0c1220; --panel2: #111a2e; --line: #22304d;
+    --text: #dbe6ff; --muted: #8696b8; --accent: #6cc4ff; --accent2: #ffc864;
+    --good: #3ddc84; --warn: #ffcc33; --bad: #ff5c5c;
+    --b1: #ffc864; --b2: #6cc4ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(90deg, #0b1324, #05070d); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  #app { display: flex; height: calc(100% - 37px); }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; }
+  #sim { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #sim.dragging { cursor: grabbing; }
+  #stageBar { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  #toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: rgba(20,30,55,.92);
+    border: 1px solid var(--line); padding: 6px 12px; border-radius: 6px; display: none; max-width: 80%; text-align: center; }
+  #panel { width: 440px; flex: 0 0 440px; overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 8px 10px 40px; }
+  @media (max-width: 900px) {
+    #app { flex-direction: column; height: auto; }
+    #stage { height: 62vh; flex: 0 0 62vh; }
+    #panel { width: 100%; flex: 1 1 auto; border-left: none; border-top: 1px solid var(--line); }
+    #stageBar { top: auto; bottom: 34px; }
+  }
+  details.card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
+  details.card > summary { cursor: pointer; padding: 7px 10px; font-weight: 600; color: var(--accent); list-style: none; user-select: none; }
+  details.card > summary::before { content: "▸ "; color: var(--muted); }
+  details.card[open] > summary::before { content: "▾ "; }
+  details.card > .body { padding: 2px 10px 10px; }
+  .row { display: grid; grid-template-columns: 112px 1fr 104px 44px; gap: 6px; align-items: center; margin: 4px 0; }
+  .row label { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row input[type=range] { width: 100%; accent-color: var(--accent); }
+  .row input[type=text], .row select { width: 100%; background: #070b16; color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 2px 5px; font: 12px ui-monospace, Consolas, monospace; }
+  .row .unit { color: var(--muted); font-size: 11px; }
+  .row.wide { grid-template-columns: 112px 1fr; }
+  .quick { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 6px 118px; }
+  button { background: #16233f; color: var(--text); border: 1px solid #2c3f66; border-radius: 5px; padding: 4px 9px;
+    font: inherit; font-size: 12px; cursor: pointer; }
+  button:hover { background: #1e3058; border-color: var(--accent); }
+  button.primary { background: #1d4a7a; border-color: #3b7cc4; }
+  button.small { padding: 1px 6px; font-size: 11px; }
+  .btnbar { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin: 6px 0; }
+  .toggles label { color: var(--text); cursor: pointer; }
+  .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .presets button { text-align: left; }
+  /* Dashboard key/value grid with formula tooltips */
+  .dash { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+  .kv { position: relative; display: flex; justify-content: space-between; gap: 6px; border-bottom: 1px dotted #23314f; padding: 1px 0; cursor: help; }
+  .kv .k { color: var(--muted); white-space: nowrap; }
+  .kv .v { font: 12px ui-monospace, Consolas, monospace; text-align: right; }
+  .kv.full { grid-column: 1 / -1; }
+  [data-tip]:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 100%; z-index: 20; width: max-content; max-width: 330px;
+    white-space: pre-wrap; background: #020409; border: 1px solid var(--accent); color: #cfe6ff; padding: 6px 8px; border-radius: 5px;
+    font: 12px/1.4 ui-monospace, Consolas, monospace; box-shadow: 0 4px 18px rgba(0,0,0,.6); pointer-events: none; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 11px; font-weight: 700; color: #04120a; }
+  .badge.good { background: var(--good); } .badge.warn { background: var(--warn); } .badge.bad { background: var(--bad); color: #200; }
+  .drift { display: flex; justify-content: space-between; align-items: center; margin: 3px 0; font: 12px ui-monospace, Consolas, monospace; }
+  canvas.graph { width: 100%; height: 130px; background: #050913; border: 1px solid var(--line); border-radius: 5px; display: block; margin: 4px 0; }
+  canvas#inset { height: 170px; }
+  .note { color: var(--muted); font-size: 12px; }
+  .note b { color: var(--text); }
+  .classifier { font-weight: 700; color: var(--accent2); }
+  .theory h4 { color: var(--accent2); margin: 10px 0 3px; }
+  .theory p, .theory li { color: #c4d2ee; }
+  .eq { font: 13px ui-monospace, Consolas, monospace; background: #070b16; border-left: 3px solid var(--accent); padding: 4px 8px; margin: 4px 0; white-space: pre-wrap; }
+  #tests li.pass::marker { content: "✔ "; color: var(--good); }
+  #tests li.fail::marker { content: "✘ "; color: var(--bad); }
+  #tests li { margin: 3px 0; }
+  .mono { font-family: ui-monospace, Consolas, monospace; }
+  .legend span { margin-right: 10px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Two-Body Problem Simulator</h1>
+  <span class="sub">Newtonian gravity · reduced mass · Kepler · geosynchronous orbits · conservation laws</span>
+</header>
+
+<main id="app">
+  <!-- ======================= LEFT: SIMULATION CANVAS ======================= -->
+  <section id="stage">
+    <canvas id="sim" aria-label="Two-body simulation view"></canvas>
+    <div id="stageBar">
+      <button id="btnPlay" class="primary">⏸ Pause</button>
+      <button id="btnStep">Step ⏭</button>
+      <button id="btnReset">↺ Reset</button>
+      <button id="btnFit" title="Re-enable auto-zoom (wheel = zoom, drag = pan)">⤢ Fit view</button>
+    </div>
+    <div id="toast"></div>
+  </section>
+
+  <!-- ======================= RIGHT: SIDE PANEL ======================= -->
+  <aside id="panel">
+
+    <details class="card" open>
+      <summary>Presets</summary>
+      <div class="body presets" id="presetBox"></div>
+    </details>
+
+    <details class="card" open>
+      <summary>Bodies &amp; initial conditions</summary>
+      <div class="body">
+        <div class="row"><label title="Mass of body 1">m₁ · <span id="name1">–</span></label>
+          <input type="range" id="m1s" min="0" max="1000"><input type="text" id="m1n"><span class="unit">kg</span></div>
+        <div class="quick" data-body="1"></div>
+        <div class="row"><label title="Mass of body 2">m₂ · <span id="name2">–</span></label>
+          <input type="range" id="m2s" min="0" max="1000"><input type="text" id="m2n"><span class="unit">kg</span></div>
+        <div class="quick" data-body="2"></div>
+        <div class="row"><label title="Initial separation |r₂ − r₁| (periapsis when the orbit helper is used)">r₀ separation</label>
+          <input type="range" id="r0s" min="0" max="1000"><input type="text" id="r0n"><span class="unit">km</span></div>
+        <div class="row wide"><label>Orbit helper</label>
+          <select id="mode">
+            <option value="manual">Manual (v₀ and launch angle)</option>
+            <option value="circular">Circular  v = √(GM/r)</option>
+            <option value="elliptical">Elliptical (r₀ = periapsis)</option>
+            <option value="parabolic">Parabolic  v = √(2GM/r)</option>
+            <option value="hyperbolic">Hyperbolic (r₀ = periapsis)</option>
+          </select></div>
+        <div class="row"><label title="Target eccentricity for the elliptical / hyperbolic helper">e (helper)</label>
+          <input type="range" id="es" min="0" max="4" step="0.001"><input type="text" id="en"><span class="unit">–</span></div>
+        <div class="row"><label title="Initial relative speed |v₂ − v₁|">v₀ relative</label>
+          <input type="range" id="v0s" min="0" max="1000"><input type="text" id="v0n"><span class="unit">km/s</span></div>
+        <div class="row"><label title="Flight-path angle: 0° = perpendicular to r (pure tangential), +90° = straight outward">launch angle γ</label>
+          <input type="range" id="gs" min="-89" max="89" step="0.1"><input type="text" id="gn"><span class="unit">deg</span></div>
+        <div class="row"><label title="Direction of the initial separation vector in the orbital plane">phase φ₀</label>
+          <input type="range" id="ps" min="0" max="360" step="0.5"><input type="text" id="pn"><span class="unit">deg</span></div>
+        <p class="note" id="helperNote"></p>
+      </div>
+    </details>
+
+    <details class="card" open>
+      <summary>Simulation controls</summary>
+      <div class="body">
+        <div class="row"><label title="Simulated seconds per real second">time scale</label>
+          <input type="range" id="tss" min="0" max="1000"><input type="text" id="tsn"><span class="unit">×</span></div>
+        <div class="row wide"><label>Integrator</label>
+          <select id="integrator">
+            <option value="verlet">Velocity-Verlet (symplectic, 2nd order)</option>
+            <option value="rk4">Runge–Kutta 4 (non-symplectic, 4th order)</option>
+          </select></div>
+        <div class="row wide"><label title="dt = (periapsis-circular period) / N.  Lower N to see Verlet vs RK4 energy behaviour.">Resolution N</label>
+          <select id="res">
+            <option value="100">100 steps / orbit (coarse)</option>
+            <option value="300">300 steps / orbit</option>
+            <option value="1000">1 000 steps / orbit</option>
+            <option value="5000" selected>5 000 steps / orbit (default)</option>
+            <option value="20000">20 000 steps / orbit (fine)</option>
+          </select></div>
+        <div class="row wide"><label>Reference frame</label>
+          <select id="frame">
+            <option value="com">Follow centre of mass</option>
+            <option value="body1">Follow body 1</option>
+            <option value="fixed">Fixed (inertial) frame</option>
+          </select></div>
+        <div class="toggles">
+          <label><input type="checkbox" id="tTrails" checked> Trails</label>
+          <label><input type="checkbox" id="tOrbit" checked> Kepler orbit (osculating)</label>
+          <label><input type="checkbox" id="tVel" checked> Velocity vectors</label>
+          <label><input type="checkbox" id="tForce" checked> Force vectors</label>
+          <label><input type="checkbox" id="tCom" checked> COM marker</label>
+          <label><input type="checkbox" id="tGrid" checked> Grid / scale</label>
+          <label><input type="checkbox" id="tKepler"> Kepler equal-area sweep</label>
+        </div>
+        <p class="note">Wheel = zoom, drag = pan, “Fit view” = auto-zoom. Body radii are drawn to scale (minimum 3–4 px so small bodies stay visible).</p>
+      </div>
+    </details>
+
+    <details class="card" open>
+      <summary>Live dashboard</summary>
+      <div class="body">
+        <div class="dash" id="dash"></div>
+        <p style="margin:6px 0 0">Orbit type: <span class="classifier" id="cls">–</span> <span class="note" id="clsWhy"></span></p>
+      </div>
+    </details>
+
+    <details class="card" open>
+      <summary>Conservation laws</summary>
+      <div class="body">
+        <div class="legend"><span style="color:#ffa04d">■ KE</span><span style="color:#6cc4ff">■ PE = −Gm₁m₂/r</span><span style="color:#ffffff">■ E = KE + PE</span></div>
+        <canvas class="graph" id="gEnergy"></canvas>
+        <div class="legend"><span style="color:#3ddc84">■ L / L₀ (about COM)</span><span style="color:#ff6bd6">■ |P| / (m₁|v₁|+m₂|v₂|)₀</span></div>
+        <canvas class="graph" id="gMom"></canvas>
+        <div class="drift" data-tip="(E − E₀) / |E₀| × 100 %   (for a parabola E₀ ≈ 0, so KE₀+|PE₀| is used as the reference)"><span id="dE">Energy drift: –</span><span class="badge" id="bE">–</span></div>
+        <div class="drift" data-tip="(L − L₀) / |L₀| × 100 %,  L = Σ mᵢ (rᵢ−R)×(vᵢ−V) = μ r×v_rel"><span id="dL">Angular momentum drift: –</span><span class="badge" id="bL">–</span></div>
+        <div class="drift" data-tip="|P| / (m₁|v₁|+m₂|v₂|)₀ × 100 %,  P = m₁v₁ + m₂v₂ (starts at exactly 0 in the COM frame)"><span id="dP">Linear momentum drift: –</span><span class="badge" id="bP">–</span></div>
+        <p class="note">Badges: <span class="badge good">green</span> &lt; 0.001 %, <span class="badge warn">yellow</span> &lt; 0.1 %, <span class="badge bad">red</span> otherwise.</p>
+        <div id="keplerStats" class="note"></div>
+        <h4 style="margin:8px 0 2px;color:var(--accent2)">Why is this conserved?</h4>
+        <ul class="note" style="margin:2px 0 6px 16px;padding:0">
+          <li><b>Energy:</b> gravity is a <i>conservative</i> force (F = −∇U with U = −Gm₁m₂/r), so the work it does depends only on the end points and KE + PE stays constant.</li>
+          <li><b>Angular momentum about the COM:</b> gravity is a <i>central</i> force along r = r₂ − r₁, so the internal torques cancel: τ = r×F = 0 ⇒ dL/dt = 0. Geometrically this is Kepler’s 2nd law, dA/dt = L/(2μ).</li>
+          <li><b>Linear momentum:</b> the only forces are the internal pair F₁₂ = −F₂₁ (Newton’s 3rd law) and there is <i>no external force</i>, so dP/dt = 0 and the COM moves at constant velocity (here: stays at rest).</li>
+        </ul>
+        <div class="btnbar">
+          <button id="btnBurn" title="External impulse: rocket exhaust leaves the system">🔥 Thrust burn +10% Δv (body 2)</button>
+          <button id="btnRetro" title="External impulse against the motion">Retro burn −10%</button>
+        </div>
+        <div class="toggles"><label title="Internal, equal-and-opposite drag pair F₂ = −k m₂ v_rel, F₁ = −F₂ (atmosphere belongs to body 1)"><input type="checkbox" id="tDrag"> Drag (atmosphere on body 1)</label></div>
+        <p class="note"><b>Thrust</b> is an <i>external</i> impulse on body 2 ⇒ E, L and P all change. <b>Drag</b> is an internal but non-conservative, non-central force pair ⇒ P stays conserved, E and L decay (orbit spirals in).</p>
+      </div>
+    </details>
+
+    <details class="card" open>
+      <summary>Geosynchronous / geostationary orbits</summary>
+      <div class="body">
+        <div class="dash" id="geoDash"></div>
+        <div class="row"><label title="Tilt of the orbital plane relative to the equator. Applied analytically to the ground track (a tilted Kepler orbit is just a rotated planar orbit).">inclination i</label>
+          <input type="range" id="is" min="0" max="90" step="0.1"><input type="text" id="in"><span class="unit">deg</span></div>
+        <div class="row"><label title="Δr added to r₀ (e.g. move a geostationary satellite above/below r_geo)">radius nudge Δr</label>
+          <input type="range" id="ns" min="-2000" max="2000" step="1"><input type="text" id="nn"><span class="unit">km</span></div>
+        <div class="note">Earth-fixed frame ground track (longitude relative to the red ground station vs latitude):</div>
+        <canvas class="graph" id="inset"></canvas>
+        <p class="note" id="geoNote">A <b>geosynchronous</b> orbit has period = one sidereal day (86 164.1 s). If it is also circular, equatorial and prograde it is <b>geostationary</b>: the satellite hangs over one point. Raise it (Δr &gt; 0) and its period gets longer ⇒ it drifts <b>west</b>; lower it ⇒ <b>east</b>. With inclination i the satellite spends half a day north and half south of the equator while its east–west speed relative to the ground oscillates, so the ground track is a <b>figure-8</b> (analemma) spanning ±i in latitude; eccentricity makes the 8 lopsided.</p>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary>Theory</summary>
+      <div class="body theory">
+        <h4>1. Newton’s law of gravitation [EQ-1, EQ-2]</h4>
+        <div class="eq">F₂₁ = −G m₁ m₂ (r₂ − r₁) / |r₂ − r₁|³ ,   F₁₂ = −F₂₁ ,   G = 6.674×10⁻¹¹ N·m²/kg²
+m₁ r̈₁ = F₁₂ ,   m₂ r̈₂ = F₂₁</div>
+        <p>Both bodies are integrated explicitly (8 state variables: x, y, vx, vy for each body).</p>
+        <h4>2. Reduced mass — one-body equivalent [EQ-12, EQ-20]</h4>
+        <div class="eq">r = r₂ − r₁ ,  M = m₁ + m₂ ,  μ = m₁m₂/M
+r̈ = r̈₂ − r̈₁ = −G(m₁+m₂) r/r³   ⇔   μ r̈ = −G m₁ m₂ r / r³
+r₁ = R − (m₂/M) r ,  r₂ = R + (m₁/M) r</div>
+        <p>The two-body problem = a fictitious particle of mass μ orbiting a fixed mass M, plus a COM R that moves uniformly. That is why the orbit helper uses GM with M = m₁+m₂, and the energies are E = ½Mv_R² + ½μv² − Gm₁m₂/r.</p>
+        <h4>3. Energy, vis-viva and the conic [EQ-5…EQ-7, EQ-13…EQ-19]</h4>
+        <div class="eq">ε = E/μ = v²/2 − GM/r   (specific orbital energy, COM frame)
+v² = GM (2/r − 1/a)                    (vis-viva)
+h = r × v ,  e = [(v² − GM/r) r − (r·v) v] / GM ,  p = h²/GM
+r(ν) = p / (1 + e cos ν) ,  a = −GM/(2ε) ,  r_p = p/(1+e) ,  r_a = p/(1−e)
+circle e = 0 · ellipse 0 &lt; e &lt; 1 (ε &lt; 0) · parabola e = 1 (ε = 0) · hyperbola e &gt; 1 (ε &gt; 0)</div>
+        <h4>4. Kepler’s three laws [EQ-16, EQ-23]</h4>
+        <ul>
+          <li><b>1st:</b> bound orbits are ellipses with the other body (or the COM) at a focus.</li>
+          <li><b>2nd:</b> equal areas in equal times: dA/dt = |r × v|/2 = L/(2μ) = const (toggle “Kepler equal-area sweep”).</li>
+          <li><b>3rd:</b> T² = 4π² a³ / (G(m₁+m₂)) — note M is the <i>total</i> mass.</li>
+        </ul>
+        <h4>5. Geosynchronous radius [EQ-21]</h4>
+        <div class="eq">circular orbit: G M m / r² = m ω² r ,  ω = 2π / T_sid
+⇒ r_geo = (G M T_sid² / 4π²)^(1/3) ≈ 42 164 km   (altitude ≈ 35 786 km)
+v_geo = √(GM / r_geo) = ω r_geo ≈ 3.075 km/s</div>
+        <p>T_sid = 86 164.1 s (one rotation relative to the stars), not 86 400 s (solar day, which includes the extra turn needed because Earth moves around the Sun).</p>
+        <h4>6. Numerical integration [EQ-3, EQ-4]</h4>
+        <div class="eq">Velocity-Verlet:  v½ = v + a(x)·dt/2 ;  x' = x + v½·dt ;  v' = v½ + a(x')·dt/2
+RK4: four slope evaluations, weights 1/6, 2/6, 2/6, 1/6</div>
+        <p>Verlet is <i>symplectic</i> and time-reversible: its energy error oscillates but does not grow, even over thousands of orbits. RK4 is more accurate per step but its energy error drifts secularly — set “Resolution” to 100 steps/orbit to watch the difference.</p>
+      </div>
+    </details>
+
+    <details class="card" open>
+      <summary>Self-tests (also printed to the browser console)</summary>
+      <div class="body"><ul id="tests" style="margin:4px 0 0 18px;padding:0"><li>running…</li></ul></div>
+    </details>
+  </aside>
+</main>
+
+<!-- ======================================================================
+     PHYSICS MODULE — pure functions, SI units, no DOM, no rendering.
+     State vector s (Float64Array of length 8):
+        s = [x1, y1, vx1, vy1,  x2, y2, vx2, vy2]
+     ====================================================================== -->
+<script id="physics-module">
+'use strict';
+const Physics = (function () {
+
+  /* ---------- constants ---------- */
+  const G = 6.674e-11;                                   // gravitational constant [N m^2 / kg^2]
+  const EARTH = { m: 5.972e24, R: 6.371e6, T_SID: 86164.1 }; // mass [kg], radius [m], sidereal day [s]
+  const OMEGA_EARTH = 2 * Math.PI / EARTH.T_SID;         // Earth's spin rate [rad/s]
+
+  /* ---------- [EQ-1, EQ-2, EQ-25] accelerations of both bodies ----------
+     F = G m1 m2 / r^2 along the line of centres; a_i = F_i / m_i.
+     Optional drag pair (perturbation): F2 = -k m2 v_rel, F1 = -F2 (internal pair). */
+  function accelerations(s, m1, m2, kDrag, out) {
+    const dx = s[4] - s[0], dy = s[5] - s[1];   // r = r2 - r1
+    const r2 = dx * dx + dy * dy;
+    const r = Math.sqrt(r2);
+    const g = G / (r2 * r);                     // G / r^3
+    out[0] =  m2 * g * dx;  out[1] =  m2 * g * dy;   // a1 =  G m2 r / r^3  (toward body 2)
+    out[2] = -m1 * g * dx;  out[3] = -m1 * g * dy;   // a2 = -G m1 r / r^3  (toward body 1)
+    if (kDrag > 0) {
+      const dvx = s[6] - s[2], dvy = s[7] - s[3];    // v_rel = v2 - v1
+      out[2] -= kDrag * dvx;            out[3] -= kDrag * dvy;            // a2 = F2/m2
+      out[0] += kDrag * (m2 / m1) * dvx; out[1] += kDrag * (m2 / m1) * dvy; // a1 = -F2/m1
+    }
+    return out;
+  }
+
+  /* ---------- [EQ-3] Velocity-Verlet step (symplectic, 2nd order) ---------- */
+  const _a = new Float64Array(4);
+  function verletStep(s, m1, m2, dt, kDrag) {
+    const h = 0.5 * dt;
+    accelerations(s, m1, m2, kDrag, _a);                         // a(x_n)
+    s[2] += h * _a[0]; s[3] += h * _a[1]; s[6] += h * _a[2]; s[7] += h * _a[3];   // half kick
+    s[0] += dt * s[2]; s[1] += dt * s[3]; s[4] += dt * s[6]; s[5] += dt * s[7];   // drift
+    accelerations(s, m1, m2, kDrag, _a);                         // a(x_{n+1})
+    s[2] += h * _a[0]; s[3] += h * _a[1]; s[6] += h * _a[2]; s[7] += h * _a[3];   // half kick
+  }
+
+  /* ---------- [EQ-4] classical Runge-Kutta 4 step ---------- */
+  const k1 = new Float64Array(8), k2 = new Float64Array(8), k3 = new Float64Array(8),
+        k4 = new Float64Array(8), tmp = new Float64Array(8);
+  function derivative(s, m1, m2, kDrag, out) {     // ds/dt = (v, a)
+    accelerations(s, m1, m2, kDrag, _a);
+    out[0] = s[2]; out[1] = s[3]; out[2] = _a[0]; out[3] = _a[1];
+    out[4] = s[6]; out[5] = s[7]; out[6] = _a[2]; out[7] = _a[3];
+  }
+  function rk4Step(s, m1, m2, dt, kDrag) {
+    let i;
+    derivative(s, m1, m2, kDrag, k1);
+    for (i = 0; i < 8; i++) tmp[i] = s[i] + 0.5 * dt * k1[i];
+    derivative(tmp, m1, m2, kDrag, k2);
+    for (i = 0; i < 8; i++) tmp[i] = s[i] + 0.5 * dt * k2[i];
+    derivative(tmp, m1, m2, kDrag, k3);
+    for (i = 0; i < 8; i++) tmp[i] = s[i] + dt * k3[i];
+    derivative(tmp, m1, m2, kDrag, k4);
+    for (i = 0; i < 8; i++) s[i] += dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+  }
+
+  /* ---------- [EQ-12] reduced mass ---------- */
+  function reducedMass(m1, m2) { return m1 * m2 / (m1 + m2); }
+
+  /* ---------- relative vectors r = r2 - r1, v = v2 - v1 ---------- */
+  function relative(s) {
+    return { rx: s[4] - s[0], ry: s[5] - s[1], vx: s[6] - s[2], vy: s[7] - s[3] };
+  }
+
+  /* ---------- [EQ-5, EQ-6, EQ-7] kinetic, potential, total energy ---------- */
+  function energies(s, m1, m2) {
+    const KE = 0.5 * m1 * (s[2] * s[2] + s[3] * s[3]) + 0.5 * m2 * (s[6] * s[6] + s[7] * s[7]);
+    const r = Math.hypot(s[4] - s[0], s[5] - s[1]);
+    const PE = -G * m1 * m2 / r;
+    return { KE, PE, E: KE + PE };
+  }
+
+  /* ---------- [EQ-8] centre of mass position and velocity ---------- */
+  function centreOfMass(s, m1, m2) {
+    const M = m1 + m2;
+    return { X: (m1 * s[0] + m2 * s[4]) / M, Y: (m1 * s[1] + m2 * s[5]) / M,
+             VX: (m1 * s[2] + m2 * s[6]) / M, VY: (m1 * s[3] + m2 * s[7]) / M };
+  }
+
+  /* ---------- [EQ-9] total linear momentum ---------- */
+  function linearMomentum(s, m1, m2) {
+    const px = m1 * s[2] + m2 * s[6], py = m1 * s[3] + m2 * s[7];
+    return { px, py, P: Math.hypot(px, py) };
+  }
+
+  /* ---------- [EQ-10] angular momentum about the COM (z-component), L = Σ m_i (r_i - R) × (v_i - V) ---------- */
+  function angularMomentumCOM(s, m1, m2) {
+    const c = centreOfMass(s, m1, m2);
+    const x1 = s[0] - c.X, y1 = s[1] - c.Y, u1 = s[2] - c.VX, w1 = s[3] - c.VY;
+    const x2 = s[4] - c.X, y2 = s[5] - c.Y, u2 = s[6] - c.VX, w2 = s[7] - c.VY;
+    return m1 * (x1 * w1 - y1 * u1) + m2 * (x2 * w2 - y2 * u2);
+  }
+
+  /* ---------- [EQ-11] same quantity via the reduced mass, L = μ r × v_rel ---------- */
+  function angularMomentumReduced(s, m1, m2) {
+    const q = relative(s);
+    return reducedMass(m1, m2) * (q.rx * q.vy - q.ry * q.vx);
+  }
+
+  /* ---------- [EQ-23] areal velocity of the relative vector: dA/dt = |r × v|/2 = L/(2μ) ---------- */
+  function arealRate(L, mu) { return L / (2 * mu); }
+
+  /* ---------- [EQ-16] Kepler's third law ---------- */
+  function keplerPeriod(a, GM) { return 2 * Math.PI * Math.sqrt(a * a * a / GM); }
+
+  /* ---------- [EQ-17] vis-viva ---------- */
+  function visViva(GM, r, a) { return Math.sqrt(GM * (2 / r - 1 / a)); }
+
+  /* ---------- [EQ-13, EQ-14, EQ-15, EQ-27] orbital elements of the relative orbit + classifier ---------- */
+  function orbitalElements(rx, ry, vx, vy, GM) {
+    const r = Math.hypot(rx, ry), v2 = vx * vx + vy * vy;
+    const eps = v2 / 2 - GM / r;                        // specific orbital energy [J/kg]
+    const h = rx * vy - ry * vx;                        // specific angular momentum (z) [m^2/s]
+    const rv = rx * vx + ry * vy;
+    const ex = ((v2 - GM / r) * rx - rv * vx) / GM;     // eccentricity vector (points to periapsis)
+    const ey = ((v2 - GM / r) * ry - rv * vy) / GM;
+    const e = Math.hypot(ex, ey);
+    const p = h * h / GM;                               // semi-latus rectum
+    const rp = p / (1 + e);                             // periapsis distance
+    const ra = e < 1 ? p / (1 - e) : Infinity;          // apoapsis distance
+    const a = eps !== 0 ? -GM / (2 * eps) : Infinity;   // semi-major axis (negative for hyperbola)
+    const T = eps < 0 ? keplerPeriod(a, GM) : Infinity; // period (bound orbits only)
+    // classifier: energy sign decides bound/unbound, e refines it (tolerances for round-off)
+    const epsScale = GM / r;
+    let type;
+    if (Math.abs(eps) < 1e-5 * epsScale || Math.abs(e - 1) < 1e-5) type = 'parabola';
+    else if (eps < 0) type = e < 1e-3 ? 'circle' : 'ellipse';
+    else type = 'hyperbola';
+    return { r, v: Math.sqrt(v2), eps, h, e, ex, ey, p, rp, ra, a, T, type, omega: Math.atan2(ey, ex) };
+  }
+
+  /* ---------- [EQ-18] initial relative speed for the orbit-type helper (r0 = periapsis) ---------- */
+  function speedForOrbit(type, GM, r0, e) {
+    switch (type) {
+      case 'circular':   return Math.sqrt(GM / r0);              // v_c = sqrt(GM/r)
+      case 'parabolic':  return Math.sqrt(2 * GM / r0);          // v_esc = sqrt(2GM/r)
+      case 'elliptical':                                          // v_p = sqrt(GM(1+e)/r_p)
+      case 'hyperbolic': return Math.sqrt(GM * (1 + e) / r0);    //   (= vis-viva with a = r_p/(1-e))
+      default: return NaN;
+    }
+  }
+
+  /* ---------- [EQ-19] state on a conic at true anomaly nu (periapsis along +x) ---------- */
+  function conicState(GM, rp, e, nu) {
+    const p = rp * (1 + e);
+    const r = p / (1 + e * Math.cos(nu));
+    const vr = Math.sqrt(GM / p) * e * Math.sin(nu);        // radial velocity
+    const vt = Math.sqrt(GM / p) * (1 + e * Math.cos(nu));  // transverse velocity
+    return { r, v: Math.hypot(vr, vt), gamma: Math.atan2(vr, vt), phi: nu };
+  }
+
+  /* ---------- [EQ-20] build the state in the COM frame (R = 0, P = 0) ----------
+     relative position r0 at angle phi; relative speed v0 at flight-path angle gamma
+     (gamma = 0: perpendicular to r, counter-clockwise).  r1 = -(m2/M) r,  r2 = (m1/M) r. */
+  function initialState(m1, m2, r0, v0, gamma, phi) {
+    const M = m1 + m2, c = Math.cos(phi), sn = Math.sin(phi);
+    const rx = r0 * c, ry = r0 * sn;
+    const vr = v0 * Math.sin(gamma), vt = v0 * Math.cos(gamma);
+    const vx = vr * c - vt * sn, vy = vr * sn + vt * c;
+    const f1 = m2 / M, f2 = m1 / M;
+    return new Float64Array([-f1 * rx, -f1 * ry, -f1 * vx, -f1 * vy, f2 * rx, f2 * ry, f2 * vx, f2 * vy]);
+  }
+
+  /* ---------- [EQ-21] geosynchronous radius r = (G M T^2 / 4 pi^2)^(1/3) ---------- */
+  function geoRadius(M, T) { return Math.cbrt(G * M * T * T / (4 * Math.PI * Math.PI)); }
+  function circularSpeed(GM, r) { return Math.sqrt(GM / r); }
+
+  /* ---------- [EQ-22] Earth's rotation angle (rotates at the sidereal rate) ---------- */
+  function earthAngle(t, theta0) { return theta0 + OMEGA_EARTH * t; }
+
+  /* ---------- [EQ-24] east-west drift rate of a near-geosynchronous satellite ---------- */
+  function geoDriftRate(T) { return 2 * Math.PI / T - OMEGA_EARTH; }   // [rad/s], >0 = eastward
+
+  /* ---------- [EQ-26] ground track: tilt the orbital plane by i about the x-axis (node line),
+     then subtract Earth's rotation.  Returns longitude (rad, wrapped to ±π) and latitude (rad). ---------- */
+  function groundTrack(rx, ry, incl, thetaEarth) {
+    const X = rx, Y = ry * Math.cos(incl), Z = ry * Math.sin(incl);
+    let lon = Math.atan2(Y, X) - thetaEarth;
+    lon = Math.atan2(Math.sin(lon), Math.cos(lon));
+    const lat = Math.asin(Z / Math.hypot(X, Y, Z));
+    return { lon, lat };
+  }
+
+  return { G, EARTH, OMEGA_EARTH, accelerations, verletStep, rk4Step, reducedMass, relative, energies,
+           centreOfMass, linearMomentum, angularMomentumCOM, angularMomentumReduced, arealRate,
+           keplerPeriod, visViva, orbitalElements, speedForOrbit, conicState, initialState,
+           geoRadius, circularSpeed, earthAngle, geoDriftRate, groundTrack };
+})();
+</script>
+
+<!-- ======================================================================
+     APPLICATION — simulation state, UI wiring, rendering, self-tests.
+     Uses only Physics.* for the physics.
+     ====================================================================== -->
+<script id="app-module">
+'use strict';
+const P_ = Physics;                       // short alias
+const TAU = 2 * Math.PI, DEG = Math.PI / 180;
+const MAX_STEPS_PER_FRAME = 40000;        // CPU budget; beyond this the sim runs slower than requested
+const TRAIL_CAP = 4000;
+
+/* ===================================================================== */
+/* 1. FORMATTING HELPERS                                                  */
+/* ===================================================================== */
+function fmtNum(x, d = 4) {
+  if (!isFinite(x)) return x > 0 ? '∞' : (x < 0 ? '−∞' : '–');
+  if (x === 0) return '0';
+  const a = Math.abs(x);
+  return (a >= 1e5 || a < 1e-3) ? x.toExponential(d - 1) : x.toPrecision(d);
+}
+const nf = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+function fmtLen(m) {
+  if (!isFinite(m)) return '∞';
+  const a = Math.abs(m);
+  if (a < 1e3) return fmtNum(m) + ' m';
+  if (a < 1e10) return nf.format(m / 1e3) + ' km';
+  return (m / 1.495978707e11).toPrecision(4) + ' AU';
+}
+function fmtTime(s) {
+  if (!isFinite(s)) return '∞';
+  const a = Math.abs(s);
+  if (a < 120) return s.toPrecision(4) + ' s';
+  if (a < 2 * 86400) return (s / 3600).toPrecision(4) + ' h';
+  if (a < 2 * 365.25 * 86400) return (s / 86400).toPrecision(4) + ' d';
+  return (s / 3.15576e7).toPrecision(4) + ' yr';
+}
+function fmtSpeed(v) { return Math.abs(v) < 1000 ? v.toPrecision(4) + ' m/s' : (v / 1000).toPrecision(5) + ' km/s'; }
+function wrapPi(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+
+/* ===================================================================== */
+/* 2. BODIES, PRESETS AND PARAMETERS                                      */
+/* ===================================================================== */
+const BODIES = {
+  earth: { name: 'Earth', m: 5.972e24, R: 6.371e6, earth: true },
+  moon:  { name: 'Moon',  m: 7.342e22, R: 1.7374e6 },
+  sun:   { name: 'Sun',   m: 1.989e30, R: 6.957e8 },
+  sat:   { name: 'Satellite', m: 1000, R: 5 },
+};
+const RHO_DEFAULT = 3000;  // kg/m^3, used to give a "custom" body a plausible radius
+function radiusFromMass(m) { return Math.cbrt(3 * m / (4 * Math.PI * RHO_DEFAULT)); }
+
+// user-editable parameters (SI units internally)
+const params = {
+  b1: { ...BODIES.earth }, b2: { ...BODIES.sat },
+  r0: 6.771e6, v0: 7670, gamma: 0, phi: 0, mode: 'circular', e: 0.5,
+  timeScale: 300, integrator: 'verlet', res: 5000, frame: 'body1',
+  incl: 0, nudge: 0, geoLock: false,
+};
+
+const RE = P_.EARTH.R, ME = P_.EARTH.m;
+const PRESETS = [
+  { id: 'binary', label: 'Equal-mass circular binary', apply: p => {
+      p.b1 = { name: 'Star A', m: 2e30, R: 7e8 }; p.b2 = { name: 'Star B', m: 2e30, R: 7e8 };
+      Object.assign(p, { r0: 1.496e11, mode: 'circular', timeScale: 1e6, frame: 'com', phi: 0, incl: 0, geoLock: false }); } },
+  { id: 'sunearth', label: 'Sun – Earth', apply: p => {
+      p.b1 = { ...BODIES.sun }; p.b2 = { ...BODIES.earth, earth: false };
+      Object.assign(p, { r0: 1.47098e11, mode: 'elliptical', e: 0.0167, timeScale: 1e6, frame: 'com', phi: 0, incl: 0, geoLock: false }); } },
+  { id: 'leo', label: 'Earth + LEO satellite (400 km)', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      Object.assign(p, { r0: RE + 400e3, mode: 'circular', timeScale: 300, frame: 'body1', phi: 0, incl: 51.6, geoLock: false }); } },
+  { id: 'geosync', label: 'Geosynchronous (i = 30°)', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      Object.assign(p, { mode: 'circular', timeScale: 3600, frame: 'body1', phi: 0, incl: 30, geoLock: true }); } },
+  { id: 'geostat', label: 'Geostationary (i = 0°)', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      Object.assign(p, { mode: 'circular', timeScale: 3600, frame: 'body1', phi: 0, incl: 0, geoLock: true }); } },
+  { id: 'gto', label: 'Geostationary transfer orbit', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      const rp = RE + 300e3, ra = P_.geoRadius(p.b1.m + p.b2.m, P_.EARTH.T_SID);
+      Object.assign(p, { r0: rp, mode: 'elliptical', e: (ra - rp) / (ra + rp), timeScale: 2000, frame: 'body1', phi: 0, incl: 0, geoLock: false }); } },
+  { id: 'parabolic', label: 'Parabolic escape', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      Object.assign(p, { r0: RE + 500e3, mode: 'parabolic', timeScale: 500, frame: 'body1', phi: 0, incl: 0, geoLock: false }); } },
+  { id: 'flyby', label: 'Hyperbolic flyby (e = 1.8)', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      const GM = P_.G * (p.b1.m + p.b2.m);
+      const c = P_.conicState(GM, 1.2e7, 1.8, -110 * DEG);   // start inbound, 110° before periapsis
+      Object.assign(p, { r0: c.r, v0: c.v, gamma: c.gamma, phi: c.phi, mode: 'manual', e: 1.8,
+                         timeScale: 1000, frame: 'body1', incl: 0, geoLock: false }); } },
+  { id: 'molniya', label: 'Molniya (e = 0.74, i = 63.4°)', apply: p => {
+      p.b1 = { ...BODIES.earth }; p.b2 = { ...BODIES.sat };
+      const a = 26600e3, e = 0.74;
+      Object.assign(p, { r0: a * (1 - e), mode: 'elliptical', e, timeScale: 3000, frame: 'body1',
+                         phi: 270 * DEG, incl: 63.4, geoLock: false }); } },
+];
+
+/* ===================================================================== */
+/* 3. SIMULATION STATE                                                    */
+/* ===================================================================== */
+// Ring buffer of fixed-width float records (avoids O(n) shifts at high time-scales)
+class Ring {
+  constructor(cap, width) { this.cap = cap; this.w = width; this.buf = new Float64Array(cap * width); this.n = 0; this.head = 0; }
+  clear() { this.n = 0; this.head = 0; }
+  push(vals) {
+    const o = this.head * this.w;
+    for (let k = 0; k < this.w; k++) this.buf[o + k] = vals[k];
+    this.head = (this.head + 1) % this.cap; if (this.n < this.cap) this.n++;
+  }
+  get(i, k) { const idx = (this.head - this.n + i + this.cap) % this.cap; return this.buf[idx * this.w + k]; }
+}
+
+const sim = {
+  s: new Float64Array(8), m1: 1, m2: 1, R1: 1, R2: 1, t: 0, dt: 1, debt: 0,
+  running: true, lagging: false, stepsLastFrame: 0, collided: false, kDrag: 0,
+  E0: 0, Eref: 1, L0: 0, Lref: 1, Pref: 1,
+  Tchar: 1, trailDt: 1, histDt: 1, nextTrail: 0, nextHist: 0,
+  trail: new Ring(TRAIL_CAP, 4),             // x1, y1, x2, y2
+  hist: new Ring(900, 6),                    // t, KE, PE, E, L, |P|
+  ground: new Ring(3000, 2),                 // lon, lat (deg) of the ground track
+  sectors: [], sector: null, sectorTau: 1, lastSectorRatio: NaN,
+  lonUnwrapped: 0, lonPrev: 0, earthTheta0: 0,
+};
+
+/** (Re)initialise the simulation from params. Starts in the COM frame with P = 0. */
+function resetSim() {
+  const p = params;
+  sim.m1 = p.b1.m; sim.m2 = p.b2.m;
+  sim.R1 = p.b1.R; sim.R2 = p.b2.R;
+  const M = sim.m1 + sim.m2, GM = P_.G * M;
+  if (p.geoLock) p.r0 = P_.geoRadius(M, P_.EARTH.T_SID);           // r_geo follows Earth's mass
+  const r = p.r0 + p.nudge;
+  if (p.mode !== 'manual') {                                         // orbit-type helper
+    let e = p.e;
+    if (p.mode === 'elliptical') e = Math.min(Math.max(e, 0), 0.99);
+    if (p.mode === 'hyperbolic') e = Math.max(e, 1.01);
+    p.v0 = P_.speedForOrbit(p.mode, GM, r, e);
+    p.gamma = 0;
+  }
+  sim.s = P_.initialState(sim.m1, sim.m2, r, p.v0, p.gamma, p.phi);
+  sim.t = 0; sim.debt = 0; sim.collided = false; sim.kDrag = 0;
+  document.getElementById('tDrag').checked = false;
+  const en = P_.energies(sim.s, sim.m1, sim.m2);
+  sim.E0 = en.E;
+  sim.Eref = Math.abs(en.E) > 1e-6 * (en.KE + Math.abs(en.PE)) ? Math.abs(en.E) : en.KE + Math.abs(en.PE);
+  sim.L0 = P_.angularMomentumCOM(sim.s, sim.m1, sim.m2);
+  sim.Lref = Math.max(Math.abs(sim.L0), 1e-9 * P_.reducedMass(sim.m1, sim.m2) * r * p.v0);
+  sim.Pref = sim.m1 * Math.hypot(sim.s[2], sim.s[3]) + sim.m2 * Math.hypot(sim.s[6], sim.s[7]);
+  sim.earthTheta0 = 0;                               // ground station (longitude 0) starts on +x axis
+  sim.trail.clear(); sim.hist.clear(); sim.ground.clear();
+  sim.sectors = []; sim.lastSectorRatio = NaN;
+  restartGroundTrack();
+  setTiming();
+  sim.nextTrail = 0; sim.nextHist = 0;
+  sim.sector = { t0: 0, area: 0, pts: [] };
+  recordSample();
+  view.auto = true; view.cx = 0; view.cy = 0; view.scale = 0;
+  syncUI();
+}
+
+/** Start a fresh Earth-fixed ground track (longitude unwrapping + drift-rate reference). */
+function restartGroundTrack() {
+  const q = P_.relative(sim.s);
+  const g = P_.groundTrack(q.rx, q.ry, params.incl * DEG, P_.earthAngle(sim.t, sim.earthTheta0));
+  sim.ground.clear();
+  sim.lonPrev = g.lon; sim.lonUnwrapped = g.lon; sim.lon0 = g.lon; sim.lonT0 = sim.t;
+}
+
+/** Characteristic time and step size from the current osculating orbit. */
+function setTiming() {
+  const M = sim.m1 + sim.m2, GM = P_.G * M, q = P_.relative(sim.s);
+  const el = P_.orbitalElements(q.rx, q.ry, q.vx, q.vy, GM);
+  const rp = Math.max(el.rp, 1);
+  const Tperi = TAU * Math.sqrt(rp * rp * rp / GM);              // period of a circle at periapsis
+  sim.Tchar = isFinite(el.T) ? el.T : Tperi;
+  const dtPhys = Tperi / params.res;                              // fixed physics sub-step
+  sim.dt = Math.min(dtPhys, params.timeScale / 60 / 4);          // at least 4 sub-steps per frame
+  sim.trailDt = sim.Tchar / 360;
+  sim.histDt = sim.Tchar / 150;
+  sim.sectorTau = sim.Tchar / 12;
+}
+
+/** Store one sample of positions for trails, Kepler sectors and the ground track. */
+function recordSample() {
+  const s = sim.s;
+  sim.trail.push([s[0], s[1], s[4], s[5]]);
+  if (sim.sector && sim.sector.pts.length < 400) sim.sector.pts.push([s[0], s[1], s[4], s[5]]);
+  const q = P_.relative(s);
+  const g = P_.groundTrack(q.rx, q.ry, params.incl * DEG, P_.earthAngle(sim.t, sim.earthTheta0));
+  sim.lonUnwrapped += wrapPi(g.lon - sim.lonPrev); sim.lonPrev = g.lon;
+  sim.ground.push([g.lon / DEG, g.lat / DEG]);
+}
+function recordHistory() {
+  const en = P_.energies(sim.s, sim.m1, sim.m2);
+  sim.hist.push([sim.t, en.KE, en.PE, en.E, P_.angularMomentumCOM(sim.s, sim.m1, sim.m2),
+                 P_.linearMomentum(sim.s, sim.m1, sim.m2).P]);
+}
+
+/** Advance the simulation by simSeconds using fixed sub-steps of size sim.dt. */
+function advance(simSeconds) {
+  sim.debt += simSeconds;
+  let n = Math.floor(sim.debt / sim.dt);
+  sim.lagging = false;
+  if (n > MAX_STEPS_PER_FRAME) { n = MAX_STEPS_PER_FRAME; sim.lagging = true; sim.debt = 0; }
+  else sim.debt -= n * sim.dt;
+  const step = params.integrator === 'rk4' ? P_.rk4Step : P_.verletStep;
+  const s = sim.s, m1 = sim.m1, m2 = sim.m2, dt = sim.dt, k = sim.kDrag, Rsum = sim.R1 + sim.R2;
+  let rxP = s[4] - s[0], ryP = s[5] - s[1];
+  for (let i = 0; i < n; i++) {
+    const tOld = sim.t;
+    step(s, m1, m2, dt, k);
+    sim.t += dt;
+    const rx = s[4] - s[0], ry = s[5] - s[1];
+    // Kepler 2nd law bookkeeping: signed area swept by r during this step (triangle 0, r_old, r_new)
+    const dA = 0.5 * (rxP * ry - ryP * rx);
+    rxP = rx; ryP = ry;
+    const sec = sim.sector, tEnd = sec.t0 + sim.sectorTau;
+    if (sim.t >= tEnd) {                       // sector boundary inside this step: split dA linearly
+      const f = (tEnd - tOld) / dt;
+      sec.area += f * dA;
+      sec.pts.push([s[0], s[1], s[4], s[5]]);
+      const L = P_.angularMomentumCOM(s, m1, m2), mu = P_.reducedMass(m1, m2);
+      sec.pred = P_.arealRate(L, mu) * sim.sectorTau;
+      sim.lastSectorRatio = sec.area / sec.pred;
+      sim.sectors.push(sec); if (sim.sectors.length > 12) sim.sectors.shift();
+      sim.sector = { t0: tEnd, area: (1 - f) * dA, pts: [[s[0], s[1], s[4], s[5]]] };
+    } else sec.area += dA;
+    if (sim.t >= sim.nextTrail) { recordSample(); sim.nextTrail = Math.max(sim.nextTrail + sim.trailDt, sim.t); }
+    if (sim.t >= sim.nextHist)  { recordHistory(); sim.nextHist = Math.max(sim.nextHist + sim.histDt, sim.t); }
+    if (rx * rx + ry * ry < Rsum * Rsum) { sim.collided = true; setRunning(false); toast('💥 Collision: separation < R₁ + R₂'); break; }
+  }
+  sim.stepsLastFrame = n;
+}
+
+/** Perturbation: instantaneous external impulse on body 2 along ±v_rel. */
+function burn(fraction) {
+  const s = sim.s, q = P_.relative(s), v = Math.hypot(q.vx, q.vy);
+  const dv = fraction * v;
+  s[6] += dv * q.vx / v; s[7] += dv * q.vy / v;
+  setTiming();
+  toast(`${fraction > 0 ? 'Prograde' : 'Retrograde'} burn: Δv = ${fmtSpeed(Math.abs(dv))} on body 2 (external impulse ⇒ E, L, P change)`);
+}
+
+/* ===================================================================== */
+/* 4. UI WIRING                                                           */
+/* ===================================================================== */
+const $ = id => document.getElementById(id);
+
+/** Log-scale slider (0..1000) bound to a text field. toDisp/fromDisp convert SI <-> display units. */
+function bindLog(sId, nId, lo, hi, get, set, toDisp = x => x, fromDisp = x => x) {
+  const sl = $(sId), tx = $(nId), l0 = Math.log10(lo), l1 = Math.log10(hi);
+  const show = () => {
+    const v = get();
+    sl.value = Math.round(1000 * (Math.log10(Math.min(Math.max(v, lo), hi)) - l0) / (l1 - l0));
+    tx.value = fmtNum(toDisp(v), 5);
+  };
+  sl.addEventListener('input', () => { set(Math.pow(10, l0 + (l1 - l0) * sl.value / 1000)); });
+  tx.addEventListener('change', () => { const v = fromDisp(parseFloat(tx.value)); if (v > 0 && isFinite(v)) set(v); else show(); });
+  return show;
+}
+function bindLin(sId, nId, get, set) {
+  const sl = $(sId), tx = $(nId);
+  const show = () => { const v = get(); sl.value = v; tx.value = +v.toFixed(3); };
+  sl.addEventListener('input', () => set(parseFloat(sl.value)));
+  tx.addEventListener('change', () => { const v = parseFloat(tx.value); if (isFinite(v)) set(v); else show(); });
+  return show;
+}
+
+const shows = [];
+function onMass(b, v) {
+  const body = b === 1 ? params.b1 : params.b2;
+  body.m = v;
+  if (!body.earth) { body.name = 'Custom'; body.R = radiusFromMass(v); }   // Earth keeps R; r_geo is recomputed
+  resetSim();
+}
+shows.push(bindLog('m1s', 'm1n', 1e20, 1e31, () => params.b1.m, v => onMass(1, v)));
+shows.push(bindLog('m2s', 'm2n', 1e20, 1e31, () => params.b2.m, v => onMass(2, v)));
+shows.push(bindLog('r0s', 'r0n', 1e6, 1e13, () => params.r0, v => { params.r0 = v; params.geoLock = false; resetSim(); }, x => x / 1e3, x => x * 1e3));
+shows.push(bindLog('v0s', 'v0n', 1, 1e6, () => params.v0, v => { params.v0 = v; params.mode = 'manual'; resetSim(); }, x => x / 1e3, x => x * 1e3));
+shows.push(bindLog('tss', 'tsn', 1, 1e6, () => params.timeScale, v => { params.timeScale = v; setTiming(); }));
+shows.push(bindLin('gs', 'gn', () => params.gamma / DEG, v => { params.gamma = v * DEG; params.mode = 'manual'; resetSim(); }));
+shows.push(bindLin('ps', 'pn', () => params.phi / DEG, v => { params.phi = v * DEG; resetSim(); }));
+shows.push(bindLin('es', 'en', () => params.e, v => { params.e = Math.max(0, v); if (params.mode === 'circular' || params.mode === 'manual') params.mode = params.e < 1 ? 'elliptical' : 'hyperbolic'; resetSim(); }));
+shows.push(bindLin('is', 'in', () => params.incl, v => { params.incl = Math.min(Math.max(v, 0), 90); restartGroundTrack(); syncUI(); }));
+shows.push(bindLin('ns', 'nn', () => params.nudge / 1e3, v => { params.nudge = v * 1e3; resetSim(); }));
+
+$('mode').addEventListener('change', e => { params.mode = e.target.value; resetSim(); });
+$('integrator').addEventListener('change', e => { params.integrator = e.target.value; resetSim(); });
+$('res').addEventListener('change', e => { params.res = +e.target.value; resetSim(); });
+$('frame').addEventListener('change', e => { params.frame = e.target.value; view.auto = true; view.cx = view.cy = 0; });
+$('tDrag').addEventListener('change', e => {
+  if (e.target.checked) {               // k chosen so the orbit decays visibly within a few orbits
+    const q = P_.relative(sim.s), r = Math.hypot(q.rx, q.ry);
+    sim.kDrag = 0.001 * Math.sqrt(P_.G * (sim.m1 + sim.m2) / (r * r * r));
+    toast('Drag on: internal force pair — P stays conserved, E and L decay');
+  } else sim.kDrag = 0;
+});
+
+// quick-mass buttons
+document.querySelectorAll('.quick').forEach(box => {
+  const b = +box.dataset.body;
+  for (const key of ['earth', 'moon', 'sun', 'sat']) {
+    const btn = document.createElement('button');
+    btn.className = 'small'; btn.textContent = BODIES[key].name + (key === 'sat' ? ' 1000 kg' : '');
+    btn.addEventListener('click', () => {
+      const body = { ...BODIES[key] };
+      if (b === 2) body.earth = false;                 // only body 1 is drawn as the rotating Earth
+      if (b === 1) params.b1 = body; else params.b2 = body;
+      resetSim();
+    });
+    box.appendChild(btn);
+  }
+});
+// presets
+for (const pr of PRESETS) {
+  const btn = document.createElement('button');
+  btn.textContent = pr.label;
+  btn.addEventListener('click', () => {
+    params.nudge = 0; params.gamma = 0;
+    pr.apply(params); resetSim();
+    $('frame').value = params.frame;
+    toast('Preset: ' + pr.label);
+  });
+  $('presetBox').appendChild(btn);
+}
+
+function setRunning(on) { sim.running = on; $('btnPlay').textContent = on ? '⏸ Pause' : '▶ Play'; }
+$('btnPlay').addEventListener('click', () => { if (sim.collided) resetSim(); setRunning(!sim.running); });
+$('btnStep').addEventListener('click', () => { setRunning(false); advance(params.timeScale / 60); });
+$('btnReset').addEventListener('click', () => { resetSim(); });
+$('btnFit').addEventListener('click', () => { view.auto = true; view.cx = view.cy = 0; });
+$('btnBurn').addEventListener('click', () => burn(+0.10));
+$('btnRetro').addEventListener('click', () => burn(-0.10));
+
+let toastTimer = 0;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', 3500); }
+
+/** Push params -> all controls and static labels. */
+function syncUI() {
+  shows.forEach(f => f());
+  $('name1').textContent = params.b1.name; $('name2').textContent = params.b2.name;
+  $('mode').value = params.mode; $('integrator').value = params.integrator; $('frame').value = params.frame;
+  $('res').value = String(params.res);
+  const helper = params.mode !== 'manual';
+  $('v0s').disabled = $('gs').disabled = helper;
+  $('helperNote').textContent = helper
+    ? `Orbit helper: v₀ = ${fmtSpeed(params.v0)} computed from M = m₁+m₂ (reduced-mass problem); r₀ is the periapsis; recomputed whenever a mass changes.`
+    : 'Manual: type v₀ and γ yourself (editing v₀ or γ switches to manual).';
+}
+
+/* ===================================================================== */
+/* 5. DASHBOARD                                                           */
+/* ===================================================================== */
+const DASH = [   // [id, label, formula tooltip, full-width?]
+  ['r', 'r = |r₂−r₁|', 'r = √((x₂−x₁)² + (y₂−y₁)²)'],
+  ['vrel', '|v_rel|', 'v_rel = |v₂ − v₁|'],
+  ['v1', '|v₁|', 'speed of body 1 in the inertial (COM) frame'],
+  ['v2', '|v₂|', 'speed of body 2 in the inertial (COM) frame'],
+  ['M', 'M', 'M = m₁ + m₂'],
+  ['mu', 'μ', 'μ = m₁ m₂ / (m₁ + m₂)   [EQ-12]'],
+  ['com', 'COM R', 'R = (m₁ r₁ + m₂ r₂) / M   [EQ-8]', true],
+  ['comv', 'COM V', 'V = (m₁ v₁ + m₂ v₂) / M = P / M  (stays 0: no external force)', true],
+  ['eps', 'ε (specific)', 'ε = v_rel²/2 − G M / r   [EQ-13]\n= E/μ in the COM frame'],
+  ['ecc', 'e', 'e = |[(v² − GM/r) r − (r·v) v]| / GM   [EQ-14]'],
+  ['a', 'a', 'a = −G M / (2 ε)   [EQ-15]\n(negative for a hyperbola)'],
+  ['T', 'T', 'T = 2π √(a³ / (G M))   [EQ-16]  (bound orbits only)'],
+  ['rp', 'r_periapsis', 'r_p = p / (1 + e),  p = h²/(GM)   [EQ-15]'],
+  ['ra', 'r_apoapsis', 'r_a = p / (1 − e)   (∞ if e ≥ 1)'],
+  ['KE', 'KE', 'KE = ½ m₁ v₁² + ½ m₂ v₂²   [EQ-5]'],
+  ['PE', 'PE', 'PE = −G m₁ m₂ / r   [EQ-6]'],
+  ['E', 'E', 'E = KE + PE   [EQ-7]'],
+  ['vv', 'vis-viva v', 'v = √(GM (2/r − 1/a))  should equal |v_rel|   [EQ-17]'],
+  ['L', 'L (Σ m r×v)', 'L = Σ mᵢ (rᵢ − R) × (vᵢ − V)   [EQ-10]'],
+  ['Lmu', 'L (μ r×v)', 'L = μ r × v_rel   [EQ-11]  — same number'],
+  ['P', '|P|', 'P = m₁ v₁ + m₂ v₂   [EQ-9]'],
+  ['dAdt', 'dA/dt', 'dA/dt = |r × v_rel| / 2 = L / (2μ)   [EQ-23]'],
+];
+const GEODASH = [
+  ['rgeo', 'r_geo', 'r_geo = (G M T_sid² / 4π²)^(1/3),  M = m₁+m₂   [EQ-21]\nrecomputed live from the current masses'],
+  ['hgeo', 'altitude', 'h = r_geo − R_Earth'],
+  ['vgeo', 'v_geo', 'v = √(G M / r_geo) = 2π r_geo / T_sid   [EQ-18]'],
+  ['Tsid', 'Earth rotation', 'T_sid = 86 164.1 s (sidereal day)'],
+  ['Torb', 'orbital period', 'T = 2π √(a³/(GM))  — compare with T_sid'],
+  ['rel', 'sat − station', 'angle of the satellite relative to the ground station\n(Earth-fixed longitude)', ],
+  ['drp', 'drift (predicted)', 'λ̇ = (2π/T − ω_E) × T_sid   [EQ-24]\n> 0 east, < 0 west'],
+  ['drm', 'drift (measured)', 'Δλ (unwrapped) / elapsed sidereal days'],
+];
+function buildDash(boxId, list) {
+  const box = $(boxId);
+  for (const [id, label, tip, full] of list) {
+    const d = document.createElement('div');
+    d.className = 'kv' + (full ? ' full' : ''); d.dataset.tip = tip; d.title = '';
+    d.innerHTML = `<span class="k">${label}</span><span class="v" id="d_${id}">–</span>`;
+    box.appendChild(d);
+  }
+}
+buildDash('dash', DASH); buildDash('geoDash', GEODASH);
+const setD = (id, txt) => { $('d_' + id).textContent = txt; };
+
+function badge(el, rel) {
+  const a = Math.abs(rel);
+  el.className = 'badge ' + (a < 1e-5 ? 'good' : a < 1e-3 ? 'warn' : 'bad');
+  el.textContent = a < 1e-5 ? 'conserved' : a < 1e-3 ? 'small drift' : 'NOT conserved';
+}
+
+function updateDashboard() {
+  const s = sim.s, m1 = sim.m1, m2 = sim.m2, M = m1 + m2, GM = P_.G * M, mu = P_.reducedMass(m1, m2);
+  const q = P_.relative(s), el = P_.orbitalElements(q.rx, q.ry, q.vx, q.vy, GM);
+  const en = P_.energies(s, m1, m2), c = P_.centreOfMass(s, m1, m2), mom = P_.linearMomentum(s, m1, m2);
+  const L = P_.angularMomentumCOM(s, m1, m2), Lmu = P_.angularMomentumReduced(s, m1, m2);
+  setD('r', fmtLen(el.r)); setD('vrel', fmtSpeed(el.v));
+  setD('v1', fmtSpeed(Math.hypot(s[2], s[3]))); setD('v2', fmtSpeed(Math.hypot(s[6], s[7])));
+  setD('M', fmtNum(M) + ' kg'); setD('mu', fmtNum(mu) + ' kg');
+  setD('com', `(${fmtNum(c.X, 3)}, ${fmtNum(c.Y, 3)}) m`); setD('comv', `(${fmtNum(c.VX, 3)}, ${fmtNum(c.VY, 3)}) m/s`);
+  setD('eps', fmtNum(el.eps) + ' J/kg'); setD('ecc', el.e.toFixed(5));
+  setD('a', isFinite(el.a) ? fmtLen(el.a) : '∞'); setD('T', fmtTime(el.T));
+  setD('rp', fmtLen(el.rp)); setD('ra', fmtLen(el.ra));
+  setD('KE', fmtNum(en.KE) + ' J'); setD('PE', fmtNum(en.PE) + ' J'); setD('E', fmtNum(en.E) + ' J');
+  setD('vv', el.eps < 0 ? fmtSpeed(P_.visViva(GM, el.r, el.a)) : (el.type === 'hyperbola' ? fmtSpeed(P_.visViva(GM, el.r, el.a)) : fmtSpeed(Math.sqrt(2 * GM / el.r))));
+  setD('L', fmtNum(L) + ' kg·m²/s'); setD('Lmu', fmtNum(Lmu) + ' kg·m²/s');
+  setD('P', fmtNum(mom.P) + ' kg·m/s'); setD('dAdt', fmtNum(Math.abs(P_.arealRate(L, mu))) + ' m²/s');
+  const names = { circle: 'CIRCLE', ellipse: 'ELLIPSE', parabola: 'PARABOLA', hyperbola: 'HYPERBOLA' };
+  $('cls').textContent = names[el.type];
+  $('clsWhy').textContent = `(ε ${el.eps < 0 ? '< 0 bound' : el.type === 'parabola' ? '≈ 0' : '> 0 unbound'}, e = ${el.e.toFixed(4)})`;
+
+  // conservation drifts
+  const dE = (en.E - sim.E0) / sim.Eref, dL = (L - sim.L0) / sim.Lref, dP = mom.P / sim.Pref;
+  $('dE').textContent = `Energy drift: ${(dE * 100).toExponential(3)} %`; badge($('bE'), dE);
+  $('dL').textContent = `Angular momentum drift: ${(dL * 100).toExponential(3)} %`; badge($('bL'), dL);
+  $('dP').textContent = `Linear momentum drift: ${(dP * 100).toExponential(3)} %`; badge($('bP'), dP);
+  $('keplerStats').innerHTML = isFinite(sim.lastSectorRatio)
+    ? `Kepler 2nd law: last sector (Δt = ${fmtTime(sim.sectorTau)}) swept area / [L/(2μ)·Δt] = <b class="mono">${sim.lastSectorRatio.toFixed(6)}</b>`
+    : `Kepler 2nd law: sectors of Δt = ${fmtTime(sim.sectorTau)} — first one closes soon.`;
+
+  // geosynchronous panel
+  const rgeo = P_.geoRadius(M, P_.EARTH.T_SID);
+  setD('rgeo', fmtLen(rgeo)); setD('hgeo', fmtLen(rgeo - (params.b1.earth ? params.b1.R : RE)));
+  setD('vgeo', fmtSpeed(P_.circularSpeed(GM, rgeo))); setD('Tsid', fmtTime(P_.EARTH.T_SID) + ` (${P_.EARTH.T_SID} s)`);
+  setD('Torb', isFinite(el.T) ? `${fmtTime(el.T)} (${el.T.toFixed(1)} s)` : '∞ (unbound)');
+  if (params.b1.earth) {
+    const g = P_.groundTrack(q.rx, q.ry, params.incl * DEG, P_.earthAngle(sim.t, sim.earthTheta0));
+    setD('rel', `${(g.lon / DEG).toFixed(3)}° lon, ${(g.lat / DEG).toFixed(2)}° lat`);
+    const drp = isFinite(el.T) ? P_.geoDriftRate(el.T) * P_.EARTH.T_SID / DEG : NaN;
+    setD('drp', isFinite(drp) ? `${drp.toFixed(3)} °/day ${drp > 0.0005 ? 'E' : drp < -0.0005 ? 'W' : ''}` : '–');
+    const days = (sim.t - sim.lonT0) / P_.EARTH.T_SID;
+    const lonNow = sim.lonUnwrapped + wrapPi(g.lon - sim.lonPrev);   // unwrapped longitude right now
+    setD('drm', days > 0.05 ? `${((lonNow - sim.lon0) / DEG / days).toFixed(3)} °/day` : '…');
+  } else { setD('rel', 'body 1 is not Earth'); setD('drp', '–'); setD('drm', '–'); }
+}
+
+/* ===================================================================== */
+/* 6. RENDERING                                                           */
+/* ===================================================================== */
+const cv = $('sim'), ctx = cv.getContext('2d');
+const view = { scale: 0, cx: 0, cy: 0, auto: true };   // scale in px per metre; (cx, cy) world point at screen centre (frame coords)
+let W = 0, H = 0, DPR = 1;
+const STARS = Array.from({ length: 260 }, () => [Math.random(), Math.random(), Math.random() * 1.2 + 0.2, Math.random()]);
+
+function fitCanvas(c, g) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [r.width, r.height];
+}
+
+/** Frame origin for a stored sample (x1,y1,x2,y2) — positions are drawn relative to this. */
+function originOf(x1, y1, x2, y2) {
+  if (params.frame === 'body1') return [x1, y1];
+  if (params.frame === 'com') { const M = sim.m1 + sim.m2; return [(sim.m1 * x1 + sim.m2 * x2) / M, (sim.m1 * y1 + sim.m2 * y2) / M]; }
+  return [0, 0];
+}
+const sx = x => W / 2 + (x - view.cx) * view.scale;
+const sy = y => H / 2 - (y - view.cy) * view.scale;
+
+function arrow(x0, y0, x1, y1, color, label) {
+  const ang = Math.atan2(y1 - y0, x1 - x0), len = Math.hypot(x1 - x0, y1 - y0);
+  if (len < 2) return;
+  ctx.strokeStyle = ctx.fillStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - 9 * Math.cos(ang - 0.4), y1 - 9 * Math.sin(ang - 0.4));
+  ctx.lineTo(x1 - 9 * Math.cos(ang + 0.4), y1 - 9 * Math.sin(ang + 0.4)); ctx.fill();
+  if (label) { ctx.font = '11px ui-monospace, Consolas, monospace'; ctx.fillText(label, x1 + 6, y1 - 4); }
+}
+
+// Earth continents (top view from above the north pole): [longitude°, radius fraction]
+const CONTINENTS = [
+  [[-125, .55], [-100, .78], [-80, .97], [-60, .93], [-45, .72], [-70, .52], [-95, .42], [-115, .40]],
+  [[-12, .52], [5, .86], [20, .98], [38, .9], [45, .66], [80, .62], [110, .55], [140, .45], [120, .33], [70, .30], [30, .36], [0, .40]],
+  [[115, .84], [150, .84], [148, .96], [118, .97]],
+  [[-50, .12], [-20, .2], [-35, .32], [-60, .26]],
+];
+function drawEarth(px, py, rad, theta) {
+  const grd = ctx.createRadialGradient(px - rad * .3, py - rad * .3, rad * .1, px, py, rad);
+  grd.addColorStop(0, '#3d8be0'); grd.addColorStop(1, '#0d2f66');
+  ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(px, py, rad, 0, TAU); ctx.fill();
+  if (rad > 6) {
+    ctx.fillStyle = '#3f9a52';
+    for (const poly of CONTINENTS) {
+      ctx.beginPath();
+      poly.forEach(([lon, f], i) => { const a = theta + lon * DEG, x = px + f * rad * Math.cos(a), y = py - f * rad * Math.sin(a); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;   // prime meridian
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + rad * Math.cos(theta), py - rad * Math.sin(theta)); ctx.stroke();
+  }
+  // ground station on the equator (longitude 0)
+  const gx = px + 0.93 * rad * Math.cos(theta), gy = py - 0.93 * rad * Math.sin(theta);
+  ctx.fillStyle = '#ff4040'; ctx.beginPath(); ctx.arc(gx, gy, Math.max(2.5, rad * .07), 0, TAU); ctx.fill();
+  ctx.font = '10px system-ui'; ctx.fillText('GS', gx + 5, gy - 5);
+  return [gx, gy];
+}
+
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+
+function render() {
+  [W, H] = fitCanvas(cv, ctx);
+  const s = sim.s, m1 = sim.m1, m2 = sim.m2, M = m1 + m2, GM = P_.G * M;
+  const [ox, oy] = originOf(s[0], s[1], s[4], s[5]);
+  const q = P_.relative(s), el = P_.orbitalElements(q.rx, q.ry, q.vx, q.vy, GM);
+  const c = P_.centreOfMass(s, m1, m2);
+
+  /* --- auto-zoom: fit trails + current bodies + predicted (bound) orbit --- */
+  if (view.auto) {
+    let ext = 0;
+    const T = sim.trail;
+    for (let i = 0; i < T.n; i += 4) {
+      const x1 = T.get(i, 0), y1 = T.get(i, 1), x2 = T.get(i, 2), y2 = T.get(i, 3), [a, b] = originOf(x1, y1, x2, y2);
+      ext = Math.max(ext, Math.hypot(x1 - a, y1 - b), Math.hypot(x2 - a, y2 - b));
+    }
+    ext = Math.max(ext, Math.hypot(s[0] - ox, s[1] - oy) + sim.R1, Math.hypot(s[4] - ox, s[5] - oy) + sim.R2);
+    if (isFinite(el.ra)) ext = Math.max(ext, params.frame === 'body1' ? el.ra : Math.max(m1, m2) / M * el.ra);
+    const target = 0.44 * Math.min(W, H) / ext;
+    view.scale = view.scale > 0 ? Math.exp(0.88 * Math.log(view.scale) + 0.12 * Math.log(target)) : target;
+    view.cx *= 0.85; view.cy *= 0.85;
+  }
+
+  /* --- background --- */
+  ctx.fillStyle = '#03050b'; ctx.fillRect(0, 0, W, H);
+  for (const [a, b, r, tw] of STARS) { ctx.fillStyle = `rgba(200,215,255,${0.25 + 0.5 * tw})`; ctx.fillRect(a * W, b * H, r, r); }
+
+  /* --- grid + scale bar --- */
+  if ($('tGrid').checked) {
+    const step = niceStep(90 / view.scale);
+    const x0 = view.cx - W / 2 / view.scale, x1 = view.cx + W / 2 / view.scale;
+    const y0 = view.cy - H / 2 / view.scale, y1 = view.cy + H / 2 / view.scale;
+    ctx.strokeStyle = 'rgba(90,120,180,.13)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) { ctx.moveTo(sx(x), 0); ctx.lineTo(sx(x), H); }
+    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) { ctx.moveTo(0, sy(y)); ctx.lineTo(W, sy(y)); }
+    ctx.stroke();
+    const bar = step * view.scale;
+    ctx.strokeStyle = ctx.fillStyle = '#9fb4dd'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(14, H - 18); ctx.lineTo(14 + bar, H - 18); ctx.moveTo(14, H - 23); ctx.lineTo(14, H - 13); ctx.moveTo(14 + bar, H - 23); ctx.lineTo(14 + bar, H - 13); ctx.stroke();
+    ctx.font = '11px system-ui'; ctx.fillText('grid = ' + fmtLen(step), 18 + bar, H - 14);
+  }
+
+  /* --- osculating Kepler orbit (analytic conic from the current elements) --- */
+  if ($('tOrbit').checked && el.p > 0) {
+    const f2 = params.frame === 'body1' ? 1 : m1 / M, f1 = params.frame === 'body1' ? 0 : m2 / M;
+    const ax = params.frame === 'body1' ? 0 : c.X - ox, ay = params.frame === 'body1' ? 0 : c.Y - oy;
+    const nuMax = el.e < 1 ? Math.PI : Math.acos(-1 / el.e) - 0.02;
+    const rLim = 4 * Math.max(W, H) / view.scale;
+    for (const [f, col] of [[f2, 'rgba(108,196,255,.35)'], [-f1, 'rgba(255,200,100,.35)']]) {
+      if (f === 0) continue;
+      ctx.strokeStyle = col; ctx.setLineDash([4, 5]); ctx.lineWidth = 1; ctx.beginPath();
+      let first = true;
+      for (let k = 0; k <= 360; k++) {
+        const nu = -nuMax + 2 * nuMax * k / 360, r = el.p / (1 + el.e * Math.cos(nu));
+        if (r < 0 || r > rLim) { first = true; continue; }
+        const ang = el.omega + nu, X = ax + f * r * Math.cos(ang), Y = ay + f * r * Math.sin(ang);
+        first ? ctx.moveTo(sx(X), sy(Y)) : ctx.lineTo(sx(X), sy(Y)); first = false;
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+
+  /* --- Kepler equal-area sectors (apex = body 1 or COM, rim = body 2) --- */
+  if ($('tKepler').checked) {
+    const all = sim.sectors.concat([sim.sector]);
+    all.forEach((sec, idx) => {
+      if (sec.pts.length < 2) return;
+      const p0 = sec.pts[0], [a0, b0] = originOf(...p0);
+      const apex = params.frame === 'body1' ? [0, 0] : [(m1 * p0[0] + m2 * p0[2]) / M - a0, (m1 * p0[1] + m2 * p0[3]) / M - b0];
+      ctx.beginPath(); ctx.moveTo(sx(apex[0]), sy(apex[1]));
+      for (const pt of sec.pts) { const [a, b] = originOf(...pt); ctx.lineTo(sx(pt[2] - a), sy(pt[3] - b)); }
+      ctx.closePath();
+      const cur = idx === all.length - 1;
+      ctx.fillStyle = cur ? 'rgba(255,255,255,.10)' : (sec.t0 / sim.sectorTau) % 2 < 1 ? 'rgba(255,200,100,.22)' : 'rgba(108,196,255,.22)';
+      ctx.fill();
+    });
+  }
+
+  /* --- trails (stored in world coords; drawn relative to the frame origin at the same instant) --- */
+  if ($('tTrails').checked && sim.trail.n > 1) {
+    const T = sim.trail;
+    for (const [k, col] of [[0, '255,200,100'], [2, '108,196,255']]) {
+      ctx.lineWidth = 1.5;
+      const seg = 40;   // draw in segments with fading alpha
+      for (let i0 = 0; i0 < T.n - 1; i0 += seg) {
+        ctx.strokeStyle = `rgba(${col},${0.15 + 0.75 * i0 / T.n})`;
+        ctx.beginPath();
+        for (let i = i0; i <= Math.min(i0 + seg, T.n - 1); i++) {
+          const x1 = T.get(i, 0), y1 = T.get(i, 1), x2 = T.get(i, 2), y2 = T.get(i, 3), [a, b] = originOf(x1, y1, x2, y2);
+          const X = sx(T.get(i, k) - a), Y = sy(T.get(i, k + 1) - b);
+          i === i0 ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y);
+        }
+        ctx.stroke();
+      }
+    }
+  }
+
+  /* --- bodies --- */
+  const p1 = [sx(s[0] - ox), sy(s[1] - oy)], p2 = [sx(s[4] - ox), sy(s[5] - oy)];
+  const r1px = Math.max(4, sim.R1 * view.scale), r2px = Math.max(3, sim.R2 * view.scale);
+  if (params.b1.earth) {
+    const theta = P_.earthAngle(sim.t, sim.earthTheta0);
+    const [gx, gy] = drawEarth(p1[0], p1[1], r1px, theta);
+    if (Math.abs(params.incl) < 1e-9) {   // line from Earth's centre through the ground station (geostationary check)
+      ctx.strokeStyle = 'rgba(255,64,64,.35)'; ctx.setLineDash([3, 4]); ctx.beginPath();
+      ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p1[0] + (gx - p1[0]) * 60, p1[1] + (gy - p1[1]) * 60); ctx.stroke(); ctx.setLineDash([]);
+    }
+  } else {
+    ctx.fillStyle = '#ffc864'; ctx.shadowColor = '#ffc864'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(p1[0], p1[1], r1px, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+  }
+  ctx.fillStyle = params.b2.name === 'Earth' ? '#3d8be0' : '#6cc4ff'; ctx.shadowColor = '#6cc4ff'; ctx.shadowBlur = 10;
+  ctx.beginPath(); ctx.arc(p2[0], p2[1], r2px, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.font = '12px system-ui'; ctx.fillStyle = '#e6eeff';
+  ctx.fillText('1 · ' + params.b1.name, p1[0] + r1px + 4, p1[1] + r1px + 12);
+  ctx.fillText('2 · ' + params.b2.name, p2[0] + r2px + 4, p2[1] - r2px - 4);
+
+  /* --- COM marker --- */
+  if ($('tCom').checked) {
+    const X = sx(c.X - ox), Y = sy(c.Y - oy);
+    ctx.strokeStyle = '#ff6bd6'; ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.arc(X, Y, 6, 0, TAU); ctx.moveTo(X - 10, Y); ctx.lineTo(X + 10, Y); ctx.moveTo(X, Y - 10); ctx.lineTo(X, Y + 10); ctx.stroke();
+    ctx.fillStyle = '#ff6bd6'; ctx.font = '10px system-ui'; ctx.fillText('COM', X + 8, Y + 14);
+  }
+
+  /* --- velocity vectors (relative to the chosen frame) --- */
+  if ($('tVel').checked) {
+    let fvx = 0, fvy = 0;
+    if (params.frame === 'body1') { fvx = s[2]; fvy = s[3]; } else if (params.frame === 'com') { fvx = c.VX; fvy = c.VY; }
+    const u1 = [s[2] - fvx, s[3] - fvy], u2 = [s[6] - fvx, s[7] - fvy];
+    const vmax = Math.max(Math.hypot(...u1), Math.hypot(...u2), 1e-30), k = 70 / vmax;
+    arrow(p1[0], p1[1], p1[0] + u1[0] * k, p1[1] - u1[1] * k, '#7dff9a', Math.hypot(...u1) > vmax * 0.05 ? 'v₁ ' + fmtSpeed(Math.hypot(...u1)) : '');
+    arrow(p2[0], p2[1], p2[0] + u2[0] * k, p2[1] - u2[1] * k, '#7dff9a', 'v₂ ' + fmtSpeed(Math.hypot(...u2)));
+  }
+  /* --- force vectors: equal magnitude, opposite direction (Newton III) --- */
+  if ($('tForce').checked) {
+    const F = P_.G * m1 * m2 / (el.r * el.r), dx = p2[0] - p1[0], dy = p2[1] - p1[1], d = Math.hypot(dx, dy) || 1, L = 45;
+    arrow(p1[0], p1[1], p1[0] + dx / d * L, p1[1] + dy / d * L, '#ff8c5a', '');
+    arrow(p2[0], p2[1], p2[0] - dx / d * L, p2[1] - dy / d * L, '#ff8c5a', 'F = ' + fmtNum(F) + ' N');
+  }
+
+  /* --- HUD --- */
+  ctx.fillStyle = 'rgba(5,9,19,.7)'; ctx.fillRect(8, 8, 330, 64);
+  ctx.fillStyle = '#dbe6ff'; ctx.font = '12px ui-monospace, Consolas, monospace';
+  ctx.fillText(`t = ${fmtTime(sim.t)}   (${sim.t.toExponential(4)} s)`, 16, 26);
+  ctx.fillText(`frame: ${{ com: 'COM', body1: 'body 1', fixed: 'fixed/inertial' }[params.frame]}   ${params.integrator === 'rk4' ? 'RK4' : 'Verlet'}   ${fmtNum(params.timeScale, 3)}×`, 16, 43);
+  ctx.fillStyle = sim.lagging ? '#ffcc33' : '#8696b8';
+  ctx.fillText(`dt = ${fmtNum(sim.dt, 3)} s × ${sim.stepsLastFrame} steps/frame${sim.lagging ? '  ⚠ CPU-capped' : ''}`, 16, 60);
+  if (!sim.running) { ctx.fillStyle = '#ffcc33'; ctx.fillText(sim.collided ? 'COLLISION — press Reset' : 'PAUSED', W / 2 - 30, 26); }
+}
+
+/* --- conservation graphs --- */
+function drawGraph(id, series, yFixed) {
+  const c = $(id), g = c.getContext('2d'), [w, h] = fitCanvas(c, g);
+  g.fillStyle = '#050913'; g.fillRect(0, 0, w, h);
+  const Hh = sim.hist; if (Hh.n < 2) return;
+  let lo = Infinity, hi = -Infinity;
+  for (const sr of series) for (let i = 0; i < Hh.n; i++) { const v = sr.f(i); if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
+  if (yFixed) { lo = Math.min(lo, yFixed[0]); hi = Math.max(hi, yFixed[1]); }
+  if (hi - lo < 1e-300) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const t0 = Hh.get(0, 0), t1 = Hh.get(Hh.n - 1, 0) || 1;
+  const X = t => 40 + (w - 48) * (t - t0) / ((t1 - t0) || 1), Y = v => h - 16 - (h - 24) * (v - lo) / (hi - lo);
+  g.strokeStyle = '#22304d'; g.beginPath(); g.moveTo(40, 6); g.lineTo(40, h - 16); g.lineTo(w - 6, h - 16); g.stroke();
+  if (lo < 0 && hi > 0) { g.setLineDash([2, 3]); g.beginPath(); g.moveTo(40, Y(0)); g.lineTo(w - 6, Y(0)); g.stroke(); g.setLineDash([]); }
+  g.fillStyle = '#8696b8'; g.font = '10px ui-monospace, Consolas, monospace';
+  g.fillText(fmtNum(hi, 3), 2, 12); g.fillText(fmtNum(lo, 3), 2, h - 18);
+  g.fillText(fmtTime(t0), 42, h - 4); const tl = fmtTime(t1); g.fillText(tl, w - 8 - g.measureText(tl).width, h - 4);
+  for (const sr of series) {
+    g.strokeStyle = sr.col; g.lineWidth = 1.5; g.beginPath();
+    for (let i = 0; i < Hh.n; i++) { const x = X(Hh.get(i, 0)), y = Y(sr.f(i)); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+  }
+}
+
+/* --- Earth-fixed ground-track inset --- */
+function drawInset() {
+  const c = $('inset'), g = c.getContext('2d'), [w, h] = fitCanvas(c, g);
+  g.fillStyle = '#050913'; g.fillRect(0, 0, w, h);
+  g.font = '11px system-ui'; g.fillStyle = '#8696b8';
+  if (!params.b1.earth) { g.fillText('Set body 1 = Earth to see the Earth-fixed ground track.', 10, h / 2); return; }
+  const Gd = sim.ground;
+  let xr = 1, yr = 1;
+  for (let i = 0; i < Gd.n; i++) { xr = Math.max(xr, Math.abs(Gd.get(i, 0))); yr = Math.max(yr, Math.abs(Gd.get(i, 1))); }
+  xr = Math.min(xr * 1.15, 180); yr = Math.min(yr * 1.15, 90);
+  const k = Math.min((w - 20) / (2 * xr), (h - 20) / (2 * yr));      // equal degrees per pixel on both axes
+  const X = lon => w / 2 + lon * k, Y = lat => h / 2 - lat * k;
+  g.strokeStyle = '#22304d'; g.beginPath(); g.moveTo(0, Y(0)); g.lineTo(w, Y(0)); g.moveTo(X(0), 0); g.lineTo(X(0), h); g.stroke();
+  g.fillText(`lon ±${xr.toFixed(xr < 10 ? 2 : 0)}°`, w - 72, Y(0) - 4); g.fillText(`lat ±${yr.toFixed(yr < 10 ? 2 : 0)}°`, X(0) + 4, 12);
+  g.strokeStyle = '#6cc4ff'; g.lineWidth = 1.5; g.beginPath();
+  for (let i = 0; i < Gd.n; i++) {
+    const lon = Gd.get(i, 0), lat = Gd.get(i, 1);
+    if (i && Math.abs(lon - Gd.get(i - 1, 0)) > 180) g.moveTo(X(lon), Y(lat)); else i ? g.lineTo(X(lon), Y(lat)) : g.moveTo(X(lon), Y(lat));
+  }
+  g.stroke();
+  g.fillStyle = '#ff4040'; g.beginPath(); g.arc(X(0), Y(0), 4, 0, TAU); g.fill(); g.fillText('GS', X(0) + 5, Y(0) + 13);
+  if (Gd.n) { g.fillStyle = '#ffffff'; g.beginPath(); g.arc(X(Gd.get(Gd.n - 1, 0)), Y(Gd.get(Gd.n - 1, 1)), 3, 0, TAU); g.fill(); }
+}
+
+/* --- mouse / touch: wheel zoom about the cursor, drag to pan --- */
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const wx = view.cx + (mx - W / 2) / view.scale, wy = view.cy - (my - H / 2) / view.scale;
+  view.scale *= Math.exp(-e.deltaY * 0.0015); view.auto = false;
+  view.cx = wx - (mx - W / 2) / view.scale; view.cy = wy + (my - H / 2) / view.scale;
+}, { passive: false });
+let drag = null;
+cv.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); cv.classList.add('dragging'); });
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  view.cx -= (e.clientX - drag[0]) / view.scale; view.cy += (e.clientY - drag[1]) / view.scale;
+  drag = [e.clientX, e.clientY]; view.auto = false;
+});
+cv.addEventListener('pointerup', () => { drag = null; cv.classList.remove('dragging'); });
+
+/* ===================================================================== */
+/* 7. MAIN LOOP (requestAnimationFrame, ~60 fps)                          */
+/* ===================================================================== */
+let lastT = performance.now(), lastDash = 0;
+function frame(now) {
+  const real = Math.min((now - lastT) / 1000, 1 / 20);   // clamp so a background tab does not jump
+  lastT = now;
+  if (sim.running) advance(params.timeScale * real);
+  render();
+  if (now - lastDash > 120) {                           // DOM updates ~8 Hz are enough
+    lastDash = now;
+    updateDashboard();
+    drawGraph('gEnergy', [
+      { col: '#ffa04d', f: i => sim.hist.get(i, 1) }, { col: '#6cc4ff', f: i => sim.hist.get(i, 2) }, { col: '#ffffff', f: i => sim.hist.get(i, 3) }]);
+    drawGraph('gMom', [
+      { col: '#3ddc84', f: i => sim.hist.get(i, 4) / sim.Lref * Math.sign(sim.L0 || 1) },
+      { col: '#ff6bd6', f: i => sim.hist.get(i, 5) / sim.Pref }], [0, 1.1]);
+    drawInset();
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ===================================================================== */
+/* 8. SELF-TESTS (console + panel). They use only the Physics module.     */
+/* ===================================================================== */
+function runSelfTests() {
+  const out = [], G = P_.G;
+  const t0 = performance.now();
+  console.group('%cTwo-body simulator — self-tests', 'color:#6cc4ff;font-weight:bold');
+
+  // T1: circular preset (equal-mass binary), Verlet, 1000 orbits, |ΔE/E0| < 1e-6
+  {
+    const m = 2e30, r0 = 1.496e11, GM = G * 2 * m, N = 5000;
+    const s = P_.initialState(m, m, r0, P_.speedForOrbit('circular', GM, r0), 0, 0);
+    const T = P_.keplerPeriod(r0, GM), dt = T / N, E0 = P_.energies(s, m, m).E;
+    let maxDev = 0;
+    for (let k = 0; k < 1000 * N; k++) {
+      P_.verletStep(s, m, m, dt, 0);
+      if (k % 25 === 0) maxDev = Math.max(maxDev, Math.abs((P_.energies(s, m, m).E - E0) / E0));
+    }
+    const endDev = Math.abs((P_.energies(s, m, m).E - E0) / E0);
+    maxDev = Math.max(maxDev, endDev);
+    out.push({ name: 'T1 circular binary: Verlet energy drift over 1000 orbits < 1e-6', pass: maxDev < 1e-6,
+               detail: `max |ΔE/E₀| = ${maxDev.toExponential(3)}, final = ${endDev.toExponential(3)} (N = ${N} steps/orbit, ${1000 * N} steps)` });
+  }
+
+  // T2: geosynchronous satellite returns to the same angle relative to the rotating Earth after one sidereal day
+  {
+    const m1 = P_.EARTH.m, m2 = 1000, M = m1 + m2, GM = G * M, Tsid = P_.EARTH.T_SID;
+    const r = P_.geoRadius(M, Tsid), v = P_.circularSpeed(GM, r), N = 5000, dt = Tsid / N;
+    const s = P_.initialState(m1, m2, r, v, 0, 0);
+    const ang = t => { const q = P_.relative(s); return wrapPi(Math.atan2(q.ry, q.rx) - P_.earthAngle(t, 0)); };
+    const a0 = ang(0);
+    let maxDev = 0;
+    for (let k = 1; k <= N; k++) { P_.verletStep(s, m1, m2, dt, 0); maxDev = Math.max(maxDev, Math.abs(ang(k * dt) - a0)); }
+    const d = Math.abs(wrapPi(ang(Tsid) - a0)) / DEG;
+    out.push({ name: 'T2 geosynchronous: same angle relative to rotating Earth after 1 sidereal day', pass: d < 1e-3,
+               detail: `|Δangle| = ${d.toExponential(3)}° (max during the day ${(maxDev / DEG).toExponential(3)}°); r_geo = ${(r / 1e3).toFixed(1)} km, altitude = ${((r - P_.EARTH.R) / 1e3).toFixed(1)} km, v = ${(v / 1e3).toFixed(4)} km/s` });
+  }
+
+  // T3: equal-mass binary — both bodies orbit the COM at equal radii (and the radius stays constant)
+  {
+    const m = 2e30, r0 = 1.496e11, GM = G * 2 * m, N = 5000;
+    const s = P_.initialState(m, m, r0, P_.speedForOrbit('circular', GM, r0), 0, 0);
+    const dt = P_.keplerPeriod(r0, GM) / N;
+    let maxAsym = 0, maxVar = 0;
+    for (let k = 0; k < 10 * N; k++) {
+      P_.verletStep(s, m, m, dt, 0);
+      const c = P_.centreOfMass(s, m, m), d1 = Math.hypot(s[0] - c.X, s[1] - c.Y), d2 = Math.hypot(s[4] - c.X, s[5] - c.Y);
+      maxAsym = Math.max(maxAsym, Math.abs(d1 - d2) / d1); maxVar = Math.max(maxVar, Math.abs(d1 - r0 / 2) / (r0 / 2));
+    }
+    out.push({ name: 'T3 equal-mass binary: |r₁−R| = |r₂−R| (orbit COM at equal radii)', pass: maxAsym < 1e-9 && maxVar < 1e-6,
+               detail: `max |d₁−d₂|/d = ${maxAsym.toExponential(3)}, radius variation = ${maxVar.toExponential(3)} over 10 orbits` });
+  }
+
+  // T4: numerical period matches T = 2π√(a³/GM)  (e = 0.6 ellipse, and the circular binary)
+  {
+    const cases = [{ m1: P_.EARTH.m, m2: 1000, rp: 7.0e6, e: 0.6 }, { m1: 2e30, m2: 2e30, rp: 1.496e11, e: 0 }];
+    let worst = 0; const parts = [];
+    for (const cs of cases) {
+      const M = cs.m1 + cs.m2, GM = G * M, a = cs.rp / (1 - cs.e), T = P_.keplerPeriod(a, GM);
+      const s = P_.initialState(cs.m1, cs.m2, cs.rp, P_.speedForOrbit(cs.e ? 'elliptical' : 'circular', GM, cs.rp, cs.e), 0, 0);
+      const dt = T / 20000, crossings = [];
+      let ryP = s[5] - s[1], t = 0;
+      while (crossings.length < 3 && t < 4 * T) {
+        P_.verletStep(s, cs.m1, cs.m2, dt, 0); t += dt;
+        const ry = s[5] - s[1], rx = s[4] - s[0];
+        if (ryP < 0 && ry >= 0 && rx > 0) crossings.push(t - dt + dt * (-ryP) / (ry - ryP));  // linear interpolation
+        ryP = ry;
+      }
+      const Tnum = crossings[2] / 3, err = Math.abs(Tnum - T) / T; worst = Math.max(worst, err);
+      parts.push(`e=${cs.e}: T_num = ${Tnum.toFixed(3)} s, T_Kepler = ${T.toFixed(3)} s, rel.err = ${err.toExponential(2)}`);
+    }
+    out.push({ name: 'T4 numerical period matches T = 2π√(a³/(GM))', pass: worst < 1e-5, detail: parts.join('; ') });
+  }
+
+  // T5: Kepler's 2nd law — equal areas in equal times, area = L/(2μ)·Δt
+  {
+    const m1 = P_.EARTH.m, m2 = 1000, GM = G * (m1 + m2), rp = 7e6, e = 0.6, a = rp / (1 - e), T = P_.keplerPeriod(a, GM);
+    const s = P_.initialState(m1, m2, rp, P_.speedForOrbit('elliptical', GM, rp, e), 0, 0);
+    const tau = T / 12, sub = 2000, dt = tau / sub, mu = P_.reducedMass(m1, m2);
+    const pred = P_.arealRate(P_.angularMomentumCOM(s, m1, m2), mu) * tau;
+    let worst = 0;
+    for (let j = 0; j < 12; j++) {
+      let A = 0;
+      for (let k = 0; k < sub; k++) {
+        const rx0 = s[4] - s[0], ry0 = s[5] - s[1];
+        P_.verletStep(s, m1, m2, dt, 0);
+        A += 0.5 * (rx0 * (s[5] - s[1]) - ry0 * (s[4] - s[0]));
+      }
+      worst = Math.max(worst, Math.abs(A - pred) / pred);
+    }
+    out.push({ name: 'T5 Kepler 2nd law: 12 equal-time sectors all have area L/(2μ)·Δt', pass: worst < 1e-4,
+               detail: `worst relative area error = ${worst.toExponential(3)} (e = 0.6, perigee/apogee speed ratio ${((1 + e) / (1 - e)).toFixed(1)})` });
+  }
+
+  // T6 (information): Verlet vs RK4 energy behaviour at a coarse step (e = 0.6, 300 steps/orbit, 500 orbits).
+  // Reports the largest |ΔE/E0| during the first 10 and the last 10 orbits.
+  {
+    const m1 = P_.EARTH.m, m2 = 1000, GM = G * (m1 + m2), rp = 7e6, e = 0.6, a = rp / (1 - e), T = P_.keplerPeriod(a, GM);
+    const NS = 300, NO = 500, res = {};
+    for (const [nm, step] of [['Verlet', P_.verletStep], ['RK4', P_.rk4Step]]) {
+      const s = P_.initialState(m1, m2, rp, P_.speedForOrbit('elliptical', GM, rp, e), 0, 0), E0 = P_.energies(s, m1, m2).E;
+      const dt = T / NS; let early = 0, late = 0;
+      for (let orb = 1; orb <= NO; orb++) for (let k = 0; k < NS; k++) {
+        step(s, m1, m2, dt, 0);
+        const d = Math.abs((P_.energies(s, m1, m2).E - E0) / E0);
+        if (orb <= 10) early = Math.max(early, d); else if (orb > NO - 10) late = Math.max(late, d);
+      }
+      res[nm] = [early, late];
+    }
+    const g = nm => (res[nm][1] / res[nm][0]).toFixed(1);
+    out.push({ name: `T6 (info) Verlet vs RK4 at ${NS} steps/orbit, e = 0.6: max |ΔE/E₀| in orbits 1–10 vs ${NO - 9}–${NO}`, pass: true, info: true,
+               detail: `Verlet ${res.Verlet[0].toExponential(2)} → ${res.Verlet[1].toExponential(2)} (×${g('Verlet')}, bounded oscillation);  RK4 ${res.RK4[0].toExponential(2)} → ${res.RK4[1].toExponential(2)} (×${g('RK4')}, grows steadily)` });
+  }
+
+  for (const r of out) {
+    const tag = r.info ? 'INFO' : r.pass ? 'PASS' : 'FAIL';
+    (r.pass ? console.log : console.error)(`%c${tag}%c ${r.name}\n      ${r.detail}`, `color:${r.info ? '#6cc4ff' : r.pass ? '#3ddc84' : '#ff5c5c'};font-weight:bold`, 'color:inherit');
+  }
+  const nFail = out.filter(r => !r.pass).length;
+  console.log(`${out.length - nFail}/${out.length} passed in ${((performance.now() - t0) / 1000).toFixed(2)} s`);
+  console.groupEnd();
+  window.selfTestResults = out;
+  $('tests').innerHTML = out.map(r => `<li class="${r.pass ? 'pass' : 'fail'}"><b>${r.name}</b><br><span class="note mono">${r.detail}</span></li>`).join('');
+}
+
+/* ===================================================================== */
+/* 9. START                                                               */
+/* ===================================================================== */
+PRESETS.find(p => p.id === 'geostat').apply(params);
+resetSim();
+requestAnimationFrame(frame);
+setTimeout(runSelfTests, 300);    // let the first frames render, then run the (≈1 s) tests
+</script>
+</body>
+</html>

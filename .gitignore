@@ -1,0 +1,7 @@
+# local deployment copy (duplicate of two_body_simulator.html)
+netlify-deploy/
+# editor / OS clutter
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
