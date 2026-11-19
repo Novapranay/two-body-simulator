@@ -1,5 +1,14 @@
 # Two-Body Problem Simulator
 
+## Team
+
+**Team members:** Jainil, Archit, Pranay
+
+- **Live simulator:** https://fascinating-sunburst-7b19a5.netlify.app
+- Forked from [semsem1313/two-body-simulator](https://github.com/semsem1313/two-body-simulator).
+
+---
+
 An interactive, physically accurate simulator of two point masses under Newtonian gravity, built for a
 second-year Mechanical Engineering **Statics & Dynamics** course. It integrates both bodies explicitly in 2D,
 shows the reduced-mass (one-body) picture, checks the conservation laws live, and has a dedicated section on
