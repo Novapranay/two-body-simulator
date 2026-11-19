@@ -5,6 +5,8 @@ second-year Mechanical Engineering **Statics & Dynamics** course. It integrates 
 shows the reduced-mass (one-body) picture, checks the conservation laws live, and has a dedicated section on
 **geosynchronous / geostationary orbits**.
 
+![Simulator showing a Molniya orbit around Earth with Kepler equal-area sectors shaded, velocity and force vectors, and the presets and initial-condition controls in the side panel](docs/images/main-view-molniya.jpg)
+
 - **Run it online:** https://semsem1313.github.io/two-body-simulator/
 - **Run it offline:** download [`two_body_simulator.html`](two_body_simulator.html) and double-click it.
 
@@ -63,6 +65,13 @@ then open http://localhost:8000/two_body_simulator.html.
    Move the *radius nudge* slider to make it drift east or west, or the *inclination* slider to draw the
    figure-8 ground track in the Earth-fixed inset. The *Theory* card has all the derivations.
 
+### Screenshots
+
+| Conservation laws (Molniya orbit) | Geosynchronous orbit, i = 30°, after one sidereal day |
+|---|---|
+| ![Conservation card: KE and PE trade off every orbit while total energy E stays flat; angular momentum L/L₀ stays at 1 and linear momentum at 0; all three drift badges green; Kepler sector ratio 1.000000](docs/images/conservation-graphs.jpg) | ![Geosynchronous card: r_geo 42,163.1 km, orbital period equal to Earth's rotation period 86,164.1 s, satellite back over the ground station, and the figure-8 ground track spanning ±30° latitude in the Earth-fixed inset](docs/images/geosynchronous-figure8.jpg) |
+| KE and PE swap every orbit, but E = KE + PE stays flat; L and P stay constant. | The period equals the sidereal day, so the satellite returns over the ground station; the inclination traces a figure-8. |
+
 ### Presets
 
 | Preset | Bodies | What it shows |
@@ -84,7 +93,8 @@ two-body-simulator/
 ├── two_body_simulator.html   the simulator (everything: layout, physics, rendering, self-tests)
 ├── index.html                tiny landing page for GitHub Pages; forwards to the simulator
 ├── docs/
-│   └── equations.md          every equation, where it is in the code, and how it is verified
+│   ├── equations.md          every equation, where it is in the code, and how it is verified
+│   └── images/               screenshots used in this README
 └── README.md                 this file
 ```
 
